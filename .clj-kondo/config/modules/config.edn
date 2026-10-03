@@ -3604,10 +3604,7 @@
 
   enterprise/advanced-config
   {:team "UX West"
-   :api  #{metabase-enterprise.advanced-config.api.logs
-           metabase-enterprise.advanced-config.file
-           metabase-enterprise.advanced-config.init
-           metabase-enterprise.advanced-config.settings}
+   :api  #{metabase-enterprise.advanced-config.api.logs metabase-enterprise.advanced-config.init metabase-enterprise.advanced-config.settings}
    :uses #{api
            api-keys
            app-db
@@ -4356,9 +4353,7 @@
   ;; Once :team and that group cover the same people, delete those lines and set :codeowners, which also owns tests.
   enterprise/remote-sync
   {:team "UX West"
-   :api  #{metabase-enterprise.remote-sync.api
-           metabase-enterprise.remote-sync.core
-           metabase-enterprise.remote-sync.init}
+   :api  #{metabase-enterprise.remote-sync.api metabase-enterprise.remote-sync.init}
    :uses #{analytics.interface
            api
            app-db
