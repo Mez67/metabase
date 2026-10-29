@@ -10,10 +10,8 @@ import { getIsLocalhostOrigin } from "embedding-sdk-shared/lib/get-is-localhost"
 import type { MetabaseAuthConfig } from "embedding-sdk-shared/types/auth-config";
 import { SdkLoadingState } from "embedding-sdk-shared/types/sdk-loading";
 import { PLUGIN_API } from "metabase/api/client";
-import {
-  SdkIframeApiKeyInProductionError,
-  SdkIframeError,
-} from "metabase/embedding/embedding-iframe-sdk/components/SdkIframeError";
+import { SdkIframeApiKeyGuard } from "metabase/embedding/embedding-iframe-sdk/components/SdkIframeApiKeyGuard";
+import { SdkIframeError } from "metabase/embedding/embedding-iframe-sdk/components/SdkIframeError";
 import { useSdkIframeEmbedEventBus } from "metabase/embedding/embedding-iframe-sdk/hooks/use-sdk-iframe-embed-event-bus";
 import type { SdkIframeEmbedSettings } from "metabase/embedding/embedding-iframe-sdk/types/embed";
 import { PLUGIN_EMBEDDING_IFRAME_SDK } from "metabase/plugins";
@@ -81,13 +79,9 @@ export function DataAppEmbed() {
     );
   }
 
-  if (embedSettings.apiKey && !isParentLocalhost) {
-    return <SdkIframeApiKeyInProductionError />;
-  }
-
   if (embedSettings.useExistingUserSession) {
     return (
-      <SdkIframeError message="Existing-session embeds are not supported for data apps." />
+      <SdkIframeError message="Existing browser sessions are not supported for data apps." />
     );
   }
 
@@ -108,19 +102,24 @@ export function DataAppEmbed() {
   }
 
   return (
-    <ComponentProvider
-      {...metabaseProviderProps}
-      authConfig={authConfig}
-      locale={embedSettings.locale}
-      reduxStore={store}
-      isLocalHost={isParentLocalhost}
+    <SdkIframeApiKeyGuard
+      apiKey={embedSettings.apiKey}
+      parentOrigin={parentOrigin}
     >
-      <DataAppEmbedContent
-        name={name}
-        path={embedSettings.path}
-        onProviderPropsLoaded={setMetabaseProviderProps}
-      />
-    </ComponentProvider>
+      <ComponentProvider
+        {...metabaseProviderProps}
+        authConfig={authConfig}
+        locale={embedSettings.locale}
+        reduxStore={store}
+        isLocalHost={isParentLocalhost}
+      >
+        <DataAppEmbedContent
+          name={name}
+          path={embedSettings.path}
+          onProviderPropsLoaded={setMetabaseProviderProps}
+        />
+      </ComponentProvider>
+    </SdkIframeApiKeyGuard>
   );
 }
 
