@@ -163,7 +163,7 @@ interface SetupOpts {
     id: TableId;
     databaseId: number;
   };
-  entityTypes?: EmbeddingEntityType[];
+  entityTypes: EmbeddingEntityType[];
   libraryCollection?: Collection;
   hasNestedQueriesEnabled?: boolean;
 }
@@ -274,13 +274,11 @@ function setup({
       canChangeDatabase={!isJoinStep}
       selectedDatabaseId={selectedTable ? selectedTable.databaseId : null}
       selectedTableId={selectedTable ? selectedTable.id : undefined}
-      canSelectModel={entityTypes ? entityTypes.includes("model") : true}
-      canSelectTable={entityTypes ? entityTypes.includes("table") : true}
-      canSelectQuestion={entityTypes ? entityTypes.includes("question") : true}
-      canSelectMetric={entityTypes ? entityTypes.includes("metric") : true}
-      canSelectSemanticLayer={
-        entityTypes ? entityTypes.includes("semantic-layer") : true
-      }
+      canSelectModel={entityTypes.includes("model")}
+      canSelectTable={entityTypes.includes("table")}
+      canSelectQuestion={entityTypes.includes("question")}
+      canSelectMetric={entityTypes.includes("metric")}
+      canSelectSemanticLayer={entityTypes.includes("semantic-layer")}
       triggerElement={<div>Click me to open or close data picker</div>}
       setSourceTableFn={jest.fn()}
     />,
@@ -298,6 +296,7 @@ describe("DataSourceSelector", () => {
   it("should close the picker when clicking outside", async () => {
     setup({
       availableModels: ["table"],
+      entityTypes: ["model", "table", "question", "metric", "semantic-layer"],
     });
 
     expect(await screen.findByText("Orders")).toBeInTheDocument();
@@ -314,6 +313,7 @@ describe("DataSourceSelector", () => {
   describe("only tables are available", () => {
     const setupOpts: SetupOpts = {
       availableModels: ["table"],
+      entityTypes: ["model", "table", "question", "metric", "semantic-layer"],
     };
 
     it("should show search input when there are 10 and more tables", async () => {
@@ -407,6 +407,7 @@ describe("DataSourceSelector", () => {
   describe("both models and tables are available", () => {
     const setupOpts: SetupOpts = {
       availableModels: ["table", "dataset"],
+      entityTypes: ["model", "table", "question", "metric", "semantic-layer"],
     };
 
     it('should go back to the databases when reopened on a model and `entityTypes` = ["table"]', async () => {
@@ -615,6 +616,7 @@ describe("DataSourceSelector", () => {
   describe("both questions and tables are available", () => {
     const setupOpts: SetupOpts = {
       availableModels: ["table", "card"],
+      entityTypes: ["model", "table", "question", "metric", "semantic-layer"],
     };
 
     it("should skip the bucket step and show the SavedEntityPicker right away if there is only questions in the bucket step", async () => {
@@ -658,6 +660,7 @@ describe("DataSourceSelector", () => {
   describe("both metrics and tables are available", () => {
     const setupOpts: SetupOpts = {
       availableModels: ["table", "metric"],
+      entityTypes: ["model", "table", "question", "metric", "semantic-layer"],
     };
 
     it("should skip the bucket step and show the SavedEntityPicker right away if there is only metrics in the bucket step", async () => {
@@ -715,6 +718,7 @@ describe("DataSourceSelector", () => {
   describe("the Library is available", () => {
     const setupOpts: SetupOpts = {
       availableModels: ["table"],
+      entityTypes: ["model", "table", "question", "metric", "semantic-layer"],
     };
 
     it("should skip the bucket step and show the Data and Metrics step right away if there is only the Library in the bucket step", async () => {
@@ -865,6 +869,7 @@ describe("DataSourceSelector", () => {
       setup({
         libraryCollection: LIBRARY_COLLECTION,
         availableModels: ["table", "card"],
+        entityTypes: ["model", "table", "question", "metric", "semantic-layer"],
       });
 
       await userEvent.click(await screen.findByText("Library"));
