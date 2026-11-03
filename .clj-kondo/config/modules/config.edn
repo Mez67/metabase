@@ -2755,6 +2755,7 @@
    :uses #{api
            app-db
            events
+           global-system
            lib.schema
            models
            premium-features
