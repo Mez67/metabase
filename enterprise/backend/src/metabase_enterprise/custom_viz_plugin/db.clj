@@ -36,15 +36,13 @@
   []
   (t2/select non-blob-model :status :active :enabled true {:order-by [[:display_name :asc]]}))
 
-(mu/defn plugin-by-identifier
-  "The CustomVizPlugin with `identifier`, or nil."
-  [identifier :- :string]
-  (t2/select-one :model/CustomVizPlugin :identifier identifier))
-
 (mu/defn plugin-identifier-ignoring-case :- [:maybe :string]
-  "Find a plugin's identifier ignoring case, or nil."
-  [identifier :- :string]
-  (t2/select-one-fn :identifier :model/CustomVizPlugin {:where [:= [:lower :identifier] (u/lower-case-en identifier)]}))
+  "The identifier of a plugin other than `except-id` (nil for none) that equals `identifier` ignoring case, or nil."
+  [identifier :- :string
+   except-id  :- [:maybe ms/PositiveInt]]
+  (t2/select-one-fn :identifier :model/CustomVizPlugin
+                    {:where (cond-> [:and [:= [:lower :identifier] (u/lower-case-en identifier)]]
+                              except-id (conj [:not= :id except-id]))}))
 
 (defn- with-bundles-where
   "Build the filter for plugins with stored bundles."

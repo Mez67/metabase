@@ -77,7 +77,7 @@
 (mu/defn entity-id-where :- [:maybe :string]
   "The `:entity_id` of the instance of `model-key` whose `column` equals `value`, or nil."
   [model-key :- :keyword
-   column    :- [:enum :name :term :identifier]
+   column    :- [:enum :name :term]
    value     :- :string]
   (t2/select-one-fn :entity_id model-key column value))
 

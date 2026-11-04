@@ -13,6 +13,7 @@
    [metabase.app-db.core :as mdb]
    [metabase.models.serialization :as serdes]
    [metabase.test :as mt]
+   [metabase.util :as u]
    [metabase.util.compress :as u.compress]
    [metabase.util.json :as json]
    [metabase.util.yaml :as yaml]
@@ -84,8 +85,11 @@
       (io/make-parents f)
       (io/copy content f))))
 
-(defn- plugin-yaml [identifier & {:as extra}]
+(defn- plugin-yaml
+  "The YAML of plugin `identifier` as an export writes it, under a fresh entity_id unless `extra` gives one."
+  [identifier & {:as extra}]
   (merge {:serdes/meta [{:model "CustomVizPlugin"}]
+          :entity_id   (u/generate-nano-id)
           :identifier  identifier
           :files       (vec (sort (keys (plugin-files identifier))))}
          extra))
@@ -93,16 +97,17 @@
 (deftest export-writes-the-yaml-and-the-bundles-files-test
   (mt/with-model-cleanup [:model/CustomVizPlugin]
     (ts/with-random-dump-dir [dump-dir "custom-viz-export-"]
-      (let [files (plugin-files "Thumbs")]
-        (insert-plugin! "Thumbs" (cv.tu/make-tgz-bytes (assoc files
-                                                              "dist/index.js.map" "{}"
-                                                              "README.md" "ignored"))
-                        :enabled false)
+      (let [files  (plugin-files "Thumbs")
+            plugin (insert-plugin! "Thumbs" (cv.tu/make-tgz-bytes (assoc files
+                                                                         "dist/index.js.map" "{}"
+                                                                         "README.md" "ignored"))
+                                   :enabled false)]
         (export! dump-dir)
         (let [plugin-dir (io/file dump-dir "custom_viz_plugins" "Thumbs")
               yaml-file  (io/file plugin-dir "custom_viz_plugin.yaml")]
-          (testing "YAML contains identity and declared resource files, not this instance's `enabled` state"
+          (testing "YAML carries the entity_id and identifier and declares the files, not this instance's `enabled` state"
             (is (= {:serdes/meta [{:model "CustomVizPlugin"}]
+                    :entity_id   (:entity_id plugin)
                     :identifier  "Thumbs"
                     :files       (vec (sort (keys files)))}
                    (yaml/from-file yaml-file))))
@@ -180,9 +185,9 @@
   (mt/with-model-cleanup [:model/CustomVizPlugin]
     (ts/with-random-dump-dir [dump-dir "custom-viz-import-"]
       (let [healthy (cache/files->bundle (plugin-files "thumbs"))
-            {id :id} (insert-plugin! "thumbs" healthy :icon "icon.svg" :metabase_version ">=1.60")]
+            {id :id entity-id :entity_id} (insert-plugin! "thumbs" healthy :icon "icon.svg" :metabase_version ">=1.60")]
         (testing "missing resources replace the existing bundle with an error"
-          (write-plugin-files! dump-dir "thumbs" (plugin-yaml "thumbs") {})
+          (write-plugin-files! dump-dir "thumbs" (plugin-yaml "thumbs" :entity_id entity-id) {})
           (import! dump-dir)
           (let [plugin (t2/select-one :model/CustomVizPlugin :id id)]
             (is (=? {:status           :error
@@ -248,16 +253,35 @@
         (export! dump-dir)
         (t2/delete! :model/CustomVizPlugin :id (:id plugin))
         (import! dump-dir)
-        (let [imported-hash (t2/select-one-fn :bundle_hash :model/CustomVizPlugin :identifier "Calendar Heatmap")]
+        (let [{imported-id :id imported-hash :bundle_hash :as imported}
+              (t2/select-one :model/CustomVizPlugin :identifier "Calendar Heatmap")]
+          (testing "the plugin keeps its entity_id across the round trip"
+            (is (= (:entity_id plugin) (:entity_id imported))))
           (testing "spaces and casing survive the round trip with resource bytes intact"
             (is (= (update-vals files seq) (stored-files "Calendar Heatmap"))))
-          (testing "exporting and importing again changes nothing"
+          (testing "exporting and importing again updates the row in place and changes nothing"
             (ts/with-random-dump-dir [dump-dir-2 "custom-viz-round-trip-"]
               (export! dump-dir-2)
               (is (= (files-in (io/file dump-dir "custom_viz_plugins" "Calendar Heatmap"))
                      (files-in (io/file dump-dir-2 "custom_viz_plugins" "Calendar Heatmap"))))
               (import! dump-dir-2)
-              (is (= imported-hash (t2/select-one-fn :bundle_hash :model/CustomVizPlugin :identifier "Calendar Heatmap"))))))))))
+              (is (= [imported-id (:entity_id plugin) imported-hash]
+                     ((juxt :id :entity_id :bundle_hash) (t2/select-one :model/CustomVizPlugin :identifier "Calendar Heatmap")))))))))))
+
+(deftest import-of-a-yaml-without-an-entity-id-registers-a-new-plugin-test
+  (testing "a hand-written YAML without entity_id lands as a new plugin under a generated one, as a data app's does"
+    (mt/with-model-cleanup [:model/CustomVizPlugin]
+      (ts/with-random-dump-dir [dump-dir "custom-viz-import-"]
+        (write-plugin-files! dump-dir "thumbs" (dissoc (plugin-yaml "thumbs") :entity_id) (plugin-files "thumbs"))
+        (import! dump-dir)
+        (let [{:keys [entity_id status]} (t2/select-one :model/CustomVizPlugin :identifier "thumbs")]
+          (is (= :active status))
+          (is (= 21 (count entity_id))))
+        (testing "imported again, it is a second plugin with the identifier of the first, so the import refuses it"
+          (is (= "A custom viz plugin \"thumbs\" already exists on this instance. Delete it and pull again: cards reference the plugin by its identifier, so they keep working once it is pulled."
+                 (try (import! dump-dir) nil
+                      (catch Exception e (ex-message (or (ex-cause e) e))))))
+          (is (= 1 (t2/count :model/CustomVizPlugin :identifier "thumbs"))))))))
 
 (deftest tar-export-holds-the-bundles-files-test
   (mt/with-model-cleanup [:model/CustomVizPlugin]

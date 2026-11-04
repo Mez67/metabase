@@ -2661,16 +2661,17 @@
   (mt/with-empty-h2-app-db!
     (let [files {"metabase-plugin.json" (json/encode {:name "test-plugin"})
                  "dist/index.js"        "{}"}]
-      (ts/with-temp-dpc [:model/CustomVizPlugin {plugin-id :id} {:display_name "Test Plugin"
-                                                                 :identifier   "test-plugin"
-                                                                 :status       :active
-                                                                 :bundle       (cv.tu/make-tgz-bytes files)}]
+      (ts/with-temp-dpc [:model/CustomVizPlugin {plugin-id :id entity-id :entity_id} {:display_name "Test Plugin"
+                                                                                      :identifier   "test-plugin"
+                                                                                      :status       :active
+                                                                                      :bundle       (cv.tu/make-tgz-bytes files)}]
         (let [ser (serdes/extract-one "CustomVizPlugin" {} (t2/select-one [:model/CustomVizPlugin :*] :id plugin-id))]
-          (is (=? {:serdes/meta [{:model "CustomVizPlugin" :id "test-plugin"}]
+          (is (=? {:serdes/meta [{:model "CustomVizPlugin" :id entity-id :label "test_plugin"}]
+                   :entity_id   entity-id
                    :identifier  "test-plugin"
                    :files       ["dist/index.js" "metabase-plugin.json"]}
                   ser))
-          (is (= #{:serdes/meta :identifier :files :serdes/resources} (set (keys ser))))
+          (is (= #{:serdes/meta :entity_id :identifier :files :serdes/resources} (set (keys ser))))
           (is (= files (:serdes/resources ser)))
           (is (empty? (serdes/deserialization-dependencies ser))))))))
 

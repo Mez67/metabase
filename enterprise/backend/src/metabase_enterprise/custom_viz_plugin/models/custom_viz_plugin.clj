@@ -41,7 +41,6 @@
 (doto :model/CustomVizPlugin
   (derive :metabase/model)
   (derive :hook/timestamped?)
-  ;; remote sync tracks a plugin by `entity_id`; serialization identifies it by `identifier` (see below)
   (derive :hook/entity-id))
 
 (t2.default-fields/define-default-fields :model/CustomVizPlugin
@@ -71,6 +70,9 @@
 
 ;;; ------------------------------------------------- Serialization --------------------------------------------------
 
+;; A plugin is identified by its `entity_id`, like every other entity, and `custom_viz_plugin.yaml` carries it as
+;; `data_app.yaml` does. The identifier is the plugin's unique natural key: it names the directory, is the manifest's
+;; `name` and the `custom:<identifier>` display type, and labels the plugin's `serdes/meta` entry.
 ;; A plugin serializes as `custom_viz_plugins/<identifier>/custom_viz_plugin.yaml` with its bundle unpacked beside it,
 ;; laid out as `npx @metabase/custom-viz pack` archives it: `metabase-plugin.json` at the root, `dist/index.js`, and
 ;; the icon the manifest names under `dist/assets/`. The YAML declares those files beside the plugin's identity.
@@ -147,15 +149,13 @@
 
 (defmethod serdes/make-spec "CustomVizPlugin"
   [_model-name _opts]
-  {:copy      [:identifier]
+  {:copy      [:entity_id :identifier]
    :skip      [;; derived from the bundle at import time (see [[bundle-columns]]), exactly as on upload
                :display_name :icon :manifest :metabase_version :bundle_hash :status :error_message
                ;; admin-owned state of this instance
                :enabled
                ;; dev-only plugins are never served from another instance
-               :dev_bundle_url
-               ;; remote sync's handle on this instance's row; the identifier is the portable identity
-               :entity_id]
+               :dev_bundle_url]
    :transform {:bundle {:as                  :serdes/resources
                         :export-with-context export-bundle
                         :import              import-bundle}}
@@ -217,14 +217,21 @@
                               directory identifier)
                       {:status-code 400})))))
 
-(defn- check-identifier-case!
-  "Throws when a stored plugin's identifier equals `identifier` except for case: it would be a second
-  plugin wherever identifiers are case-sensitive, and a renamed one wherever they are not."
+(defn- check-identifier-free!
+  "Throws unless `identifier` can name the ingested plugin, matched to `maybe-local` by its `entity_id` or new: no
+  other plugin may hold the identifier (a plugin made on this instance holds it under another `entity_id`), and no
+  other plugin may hold one equal to it except for case: it would be a second plugin wherever identifiers are
+  case-sensitive, and a renamed one wherever they are not. The matched plugin itself may take any identifier,
+  including its own in another case: that is a rename, and the identifier is not the plugin's identity."
   [identifier maybe-local]
-  ;; On case-insensitive app DBs (MySQL), `maybe-local` may already have a different case.
-  (when-let [existing (or (:identifier maybe-local)
-                          (custom-viz-plugin.db/plugin-identifier-ignoring-case identifier))]
-    (when (not= existing identifier)
+  (when-let [existing (custom-viz-plugin.db/plugin-identifier-ignoring-case identifier (:id maybe-local))]
+    (if (= existing identifier)
+      ;; the unique index would refuse the write anyway, but with an error that doesn't say what to do
+      (throw (ex-info (format (str "A custom viz plugin \"%s\" already exists on this instance. Delete it and pull "
+                                   "again: cards reference the plugin by its identifier, so they keep working once "
+                                   "it is pulled.")
+                              identifier)
+                      {:status-code 400}))
       (throw (ex-info (format "Custom viz plugin \"%s\" differs only in case from the existing plugin \"%s\""
                               identifier existing)
                       {:status-code 400})))))
@@ -236,7 +243,7 @@
   (when (nil? maybe-local)
     (when-let [error (manifest/directory-name-error identifier)]
       (throw (ex-info error {:status-code 400}))))
-  (check-identifier-case! identifier maybe-local)
+  (check-identifier-free! identifier maybe-local)
   (serdes/default-load-one! ingested maybe-local))
 
 (defmethod serdes/load-insert! "CustomVizPlugin"
@@ -249,22 +256,15 @@
   (cache/purge-plugin-cache! {:id id})
   (custom-viz-plugin.db/custom-viz-plugin id))
 
-(defmethod serdes/entity-id "CustomVizPlugin" [_ {:keys [identifier]}]
-  identifier)
+(defmethod serdes/generate-path "CustomVizPlugin" [model-name entity]
+  ;; identified by `entity_id` as every entity is; labelled by the identifier, which has no `name` column to come from
+  (serdes/maybe-labeled model-name entity :identifier))
 
-(defmethod serdes/generate-path "CustomVizPlugin" [_ entity]
-  [{:model "CustomVizPlugin"
-    :id    (:identifier entity)
-    :label (:identifier entity)}])
-
-(defmethod serdes/load-find-local "CustomVizPlugin" [path]
-  (let [{:keys [id]} (last path)]
-    (custom-viz-plugin.db/plugin-by-identifier id)))
-
-(defmethod serdes/storage-path "CustomVizPlugin" [{:keys [identifier]} _ctx]
-  ;; the directory is the identifier verbatim: it is checked against the identifier on import
+(defmethod serdes/storage-path "CustomVizPlugin" [{:keys [identifier entity_id]} _ctx]
+  ;; the directory is the identifier verbatim, as an app's is its slug: identifiers are unique, so the dedup suffix
+  ;; never fires, and the directory is checked against the identifier on import
   [{:label "custom_viz_plugins"}
-   {:label identifier :key identifier :style :slug}
+   {:label identifier :key entity_id :style :slug}
    {:label "custom_viz_plugin"}])
 
 (defmethod serdes/resource-paths "CustomVizPlugin" [{:keys [files]}]

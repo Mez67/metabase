@@ -36,13 +36,19 @@
    "dist/index.js"        js
    "dist/assets/icon.svg" icon-svg})
 
+(defn- entity-id
+  "A stable entity_id for plugin `identifier` in a repo: the identifier padded to the 21 characters of a NanoID."
+  [identifier]
+  (subs (str identifier "000000000000000000000") 0 21))
+
 (defn- plugin-tree
-  "Repo files for plugin `identifier`: its YAML and the files of its bundle."
-  [identifier js]
+  "Repo files for plugin `identifier`: its YAML, carrying its entity_id like a data app's, and the files of its
+  bundle."
+  [identifier js & {:keys [entity-id] :or {entity-id (entity-id identifier)}}]
   (let [dir   (str "custom_viz_plugins/" identifier "/")
         files (plugin-files identifier js)]
     (into {(str dir "custom_viz_plugin.yaml")
-           (str "identifier: " identifier "\nfiles:\n"
+           (str "entity_id: " entity-id "\nidentifier: " identifier "\nfiles:\n"
                 (apply str (map #(str "- " % "\n") (sort (keys files))))
                 "serdes/meta:\n- model: CustomVizPlugin\n")}
           (map (fn [[path content]] [(str dir path) content]))
@@ -112,11 +118,12 @@
   (with-plugin-sync
     (let [src (test-helpers/versioned-source :trees {"v0" (plugin-tree "thumbs" "v1();")
                                                      "v1" (plugin-tree "thumbs" "v2();")
+                                                     "v1-renamed" (plugin-tree "Thumbs2" "v2();" :entity-id (entity-id "thumbs"))
                                                      "v2" {"README.md" "x"}}
                                              :current "v0")]
-      (testing "a pull registers the plugin from its files, text intact"
+      (testing "a pull registers the plugin from its files, under the repo's entity_id, text intact"
         (import-ok! src "v0" :force? true)
-        (is (=? {:status :active :enabled true :display_name "thumbs" :icon "icon.svg"}
+        (is (=? {:status :active :enabled true :display_name "thumbs" :icon "icon.svg" :entity_id (entity-id "thumbs")}
                 (t2/select-one :model/CustomVizPlugin :identifier "thumbs")))
         (is (= (plugin-files "thumbs" "v1();") (stored-files "thumbs")))
         (is (= "synced" (t2/select-one-fn :status :model/RemoteSyncObject :model_type "CustomVizPlugin"))))
@@ -125,9 +132,15 @@
           (import-ok! src "v1")
           (is (= id (t2/select-one-pk :model/CustomVizPlugin :identifier "thumbs")))
           (is (= "v2();" (get (stored-files "thumbs") "dist/index.js")))))
+      (testing "a renamed directory, manifest and identifier under the same entity_id rename the plugin in place"
+        (let [id (t2/select-one-pk :model/CustomVizPlugin :identifier "thumbs")]
+          (import-ok! src "v1-renamed")
+          (is (=? {:id id :identifier "Thumbs2" :display_name "Thumbs2" :status :active}
+                  (t2/select-one :model/CustomVizPlugin :entity_id (entity-id "thumbs"))))
+          (is (= "Thumbs2" (t2/select-one-fn :model_name :model/RemoteSyncObject :model_type "CustomVizPlugin" :model_id id)))))
       (testing "a plugin whose directory is gone is deleted"
         (import-ok! src "v2")
-        (is (not (t2/exists? :model/CustomVizPlugin :identifier "thumbs")))
+        (is (not (t2/exists? :model/CustomVizPlugin :entity_id (entity-id "thumbs"))))
         (is (not (t2/exists? :model/RemoteSyncObject :model_type "CustomVizPlugin")))))))
 
 (deftest pull-leaves-enabled-to-the-instance-test
@@ -150,6 +163,29 @@
         (upload! 200 (plugin-files "ops" "ops();"))
         (is (=? {:status :conflict} (import-at! src "v1")))
         (is (t2/exists? :model/CustomVizPlugin :identifier "ops"))))))
+
+(deftest pull-refuses-a-plugin-whose-identifier-is-taken-test
+  (testing "a plugin uploaded here holds its identifier under another entity_id: the pull fails saying what to do"
+    (with-plugin-sync
+      (let [src (test-helpers/versioned-source :trees {"v0" (plugin-tree "thumbs" "v1();")} :current "v0")]
+        (upload! 200 (plugin-files "thumbs" "local();"))
+        (let [{:keys [id entity_id]} (t2/select-one :model/CustomVizPlugin :identifier "thumbs")
+              ledger (t2/select :model/RemoteSyncObject :model_type "CustomVizPlugin")]
+          (is (=? {:status  :error
+                   :message #"(?s).*A custom viz plugin \"thumbs\" already exists on this instance\. Delete it and pull again.*"}
+                  (import-at! src "v0" :force? true)))
+          (testing "the local plugin and the ledger are untouched"
+            (is (= [id entity_id "local();"]
+                   [(t2/select-one-pk :model/CustomVizPlugin :identifier "thumbs")
+                    (t2/select-one-fn :entity_id :model/CustomVizPlugin :identifier "thumbs")
+                    (get (stored-files "thumbs") "dist/index.js")]))
+            (is (= ledger (t2/select :model/RemoteSyncObject :model_type "CustomVizPlugin"))))
+          (testing "once the local plugin is deleted, the pull lands the repo's"
+            (mt/user-http-request :crowberto :delete 204 (str "ee/custom-viz-plugin/" id))
+            (import-ok! src "v0" :force? true)
+            (is (=? {:entity_id (entity-id "thumbs") :status :active}
+                    (t2/select-one :model/CustomVizPlugin :identifier "thumbs")))
+            (is (= "v1();" (get (stored-files "thumbs") "dist/index.js")))))))))
 
 (deftest export-writes-and-removes-plugin-files-test
   (with-plugin-sync

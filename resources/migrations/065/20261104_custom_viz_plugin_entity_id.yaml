@@ -1,7 +1,7 @@
-## Custom viz plugins get an entity_id so remote sync can track them in its ledger like every other synced model.
-## Their serialization identity stays the identifier: the YAML does not carry the entity_id, and the column exists
-## only to feed remote sync on one instance. Backfill mirrors 20261019_osi_ai_context_entity_id: all three dialect
-## variants in one changeset so every database records it, then NOT NULL and UNIQUE.
+## Custom viz plugins get an entity_id: their portable serialization identity, carried in custom_viz_plugin.yaml and
+## tracked by remote sync's ledger, exactly as a data app's. The identifier stays a unique natural key (directory name,
+## manifest name, display type). Backfill mirrors 20261019_osi_ai_context_entity_id: all three dialect variants in one
+## changeset so every database records it, then NOT NULL and UNIQUE.
 
 databaseChangeLog:
   - changeSet:

@@ -423,9 +423,7 @@
     :removal        {:statuses #{"removed" "delete"}}
     :resources?     true
     :export-scope   :all
-    :enabled?       true
-    ;; a plugin's file is keyed by its identifier, not its entity_id; resolve those paths through load-find-local
-    :natural-key-paths? true}})
+    :enabled?       true}})
 
 ;;; ------------------------------------------------- Helper Functions -------------------------------------------------
 

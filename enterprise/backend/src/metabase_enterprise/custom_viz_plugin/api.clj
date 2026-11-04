@@ -51,7 +51,7 @@
   "Throw a 400 when a plugin already has `identifier`, or has it in another case: a repository names a plugin's
    directory by its identifier, and case-insensitive filesystems would merge the two."
   [identifier]
-  (when-let [existing (custom-viz-plugin.db/plugin-identifier-ignoring-case identifier)]
+  (when-let [existing (custom-viz-plugin.db/plugin-identifier-ignoring-case identifier nil)]
     (throw (ex-info (if (= existing identifier)
                       (format "A custom visualization with identifier \"%s\" already exists." identifier)
                       (format "Custom viz plugin \"%s\" differs only in case from the existing plugin \"%s\""
