@@ -501,8 +501,8 @@
 
 (defn- turn-tracking-opts
   "The tracking opts of one turn: the caller's `tracking-opts` over the defaults, among them the request id that
-  ties the turn's analytics events together. Built before [[init-agent]], so a turn that dies there still reports
-  its finish."
+  ties the turn's analytics events together. Built by [[run-agent-loop]] before [[init-agent]], which takes the
+  result as given, so a turn that dies in the agent's setup still reports its finish."
   [profile-id tracking-opts]
   (merge {:profile-id          profile-id
           :request-id          (str (random-uuid))
@@ -566,7 +566,7 @@
      :system-msg    (messages/build-system-message context profile tools)
      :context       context
      :memory-atom   memory-atom
-     :tracking-opts (turn-tracking-opts profile-id tracking-opts)}))
+     :tracking-opts tracking-opts}))
 
 (defn- initial-loop-state
   "Create initial loop state from agent config and reduction context."
