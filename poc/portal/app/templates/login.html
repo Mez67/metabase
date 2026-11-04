@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}ورود{% endblock %}
+{% block body %}
+<main style="max-width: 380px; margin-top: 10vh;">
+  <div class="card">
+    <h1 style="margin-bottom: 4px;">پورتال گزارش‌ها</h1>
+    <p class="muted">ورود با حساب سازمانی (Active Directory) · نمونه‌ی <span class="badge">{{ backend }}</span></p>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <form method="post" action="/login">
+      <p><label>نام کاربری<br><input name="username" autocomplete="username" dir="ltr" required></label></p>
+      <p><label>رمز عبور<br><input name="password" type="password" autocomplete="current-password" dir="ltr" required></label></p>
+      <button type="submit">ورود</button>
+    </form>
+  </div>
+</main>
+{% endblock %}

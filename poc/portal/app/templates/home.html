@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block body %}
+<header>
+  <h1>پورتال گزارش‌ها <span class="badge">{{ backend }}</span></h1>
+  <div class="who">
+    {{ user.name }} · شعبه: <b>{{ "همه‌ی شعبه‌ها" if is_manager else user.branch }}</b>
+    {% if is_manager %} · <a href="/audit">گزارش فعالیت</a>{% endif %}
+    <form method="post" action="/logout" style="display:inline"><button class="secondary" type="submit">خروج</button></form>
+  </div>
+</header>
+<main>
+  <div class="card">
+    <h2>ساخت گزارش با هوش مصنوعی</h2>
+    <form id="ask-form" style="display:flex; gap:8px; flex-wrap:wrap;">
+      <input id="question" style="flex:1; min-width:240px" placeholder="مثلاً: فروش ماهانه در سال گذشته به تفکیک دسته‌بندی محصول" required>
+      <button type="submit" id="ask-btn">بساز</button>
+    </form>
+    <p class="muted">فقط ساختار جدول‌ها به مدل (Ollama روی سرور خودتان) فرستاده می‌شود. فیلتر شعبه را خود پایگاه داده اعمال می‌کند.</p>
+    <div id="ask-result" hidden>
+      <h2 id="ai-title"></h2>
+      <div style="position:relative; height:320px;"><canvas id="ai-chart"></canvas></div>
+      <details><summary class="muted">کوئری ساخته‌شده و داده‌ها</summary>
+        <pre id="ai-sql"></pre>
+        <div class="scroll"><table id="ai-table"></table></div>
+      </details>
+    </div>
+    <p id="ask-error" class="error" hidden></p>
+  </div>
+
+  <div class="card">
+    <h2>داشبورد فروش</h2>
+    {% if error %}
+      <p class="error">داشبورد آماده نیست: {{ error }}</p>
+    {% elif embed.kind == "iframe" %}
+      <iframe src="{{ embed.url }}" style="width:100%; height:900px; border:0;" allowtransparency></iframe>
+    {% else %}
+      <div id="superset-container" style="height:900px;"></div>
+    {% endif %}
+  </div>
+</main>
+
+<script src="/static/vendor/chart-4.4.1.umd.js"></script>
+{% if embed and embed.kind == "superset" %}
+<script src="/static/vendor/superset-embedded-sdk-0.1.3.js"></script>
+<script>
+  supersetEmbeddedSdk.embedDashboard({
+    id: {{ embed.uuid | tojson }},
+    supersetDomain: {{ embed.domain | tojson }},
+    mountPoint: document.getElementById("superset-container"),
+    fetchGuestToken: async () => (await (await fetch("/api/guest-token")).json()).token,
+    dashboardUiConfig: { hideTitle: false, filters: { expanded: false } },
+  }).then(() => {
+    const iframe = document.querySelector("#superset-container iframe");
+    if (iframe) { iframe.style.width = "100%"; iframe.style.height = "100%"; iframe.style.border = "0"; }
+  });
+</script>
+{% endif %}
+<script>
+  let chart;
+  const $ = (id) => document.getElementById(id);
+
+  function renderTable(columns, rows) {
+    const table = $("ai-table");
+    table.replaceChildren();
+    const head = table.createTHead().insertRow();
+    columns.forEach((c) => { const th = document.createElement("th"); th.textContent = c; head.appendChild(th); });
+    const body = table.createTBody();
+    rows.slice(0, 200).forEach((r) => {
+      const tr = body.insertRow();
+      r.forEach((v) => { tr.insertCell().textContent = v === null ? "" : String(v); });
+    });
+  }
+
+  function renderChart(res) {
+    if (chart) { chart.destroy(); chart = null; }
+    const canvas = $("ai-chart");
+    const spec = res.chart;
+    const xi = res.columns.indexOf(spec.x);
+    let yi = res.columns.indexOf(spec.y);
+    if (yi < 0) yi = res.columns.findIndex((_, i) => res.rows.length && typeof res.rows[0][i] === "number");
+    const type = { bar: "bar", line: "line", pie: "pie" }[spec.type];
+    canvas.parentElement.hidden = !(type && xi >= 0 && yi >= 0);
+    if (canvas.parentElement.hidden) return;
+    chart = new Chart(canvas, {
+      type,
+      data: {
+        labels: res.rows.map((r) => r[xi]),
+        datasets: [{ label: res.columns[yi], data: res.rows.map((r) => r[yi]) }],
+      },
+      options: { responsive: true, maintainAspectRatio: false },
+    });
+  }
+
+  $("ask-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("ask-btn");
+    btn.disabled = true; btn.textContent = "در حال ساخت…";
+    $("ask-error").hidden = true;
+    try {
+      const resp = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: $("question").value }),
+      });
+      const res = await resp.json();
+      if (!resp.ok) throw new Error(res.detail || "خطا");
+      $("ask-result").hidden = false;
+      $("ai-title").textContent = res.chart.title;
+      $("ai-sql").textContent = res.sql;
+      renderTable(res.columns, res.rows);
+      renderChart(res);
+    } catch (err) {
+      $("ask-error").textContent = "ساخت گزارش ممکن نشد: " + err.message;
+      $("ask-error").hidden = false;
+    } finally {
+      btn.disabled = false; btn.textContent = "بساز";
+    }
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,202 @@
+# Two proofs of concept side by side, sharing the same data, directory and AI:
+#
+#   docker compose --profile metabase up -d     # Metabase OSS + portal on :8081
+#   docker compose --profile superset up -d     # Superset + portal on :8082
+#   docker compose --profile metabase --profile superset up -d   # both
+#
+# See README.md for the full steps.
+
+x-ldap-env: &ldap-env
+  LDAP_URL: ldap://ldap:389
+  # Read-only lookup account (in AD: a service account with read access).
+  LDAP_BIND_DN: cn=readonly,dc=corp,dc=local
+  LDAP_BIND_PASSWORD: ${LDAP_READONLY_PASSWORD:-readonly}
+
+services:
+  # --- shared ---------------------------------------------------------------
+  sample-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sales
+      POSTGRES_PASSWORD: ${SAMPLE_DB_PASSWORD:-postgres}
+    volumes:
+      - ./shared/sample-db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - sample-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sales"]
+      interval: 5s
+      retries: 30
+
+  # Stands in for Active Directory. Point the services at your AD instead.
+  ldap:
+    image: osixia/openldap:1.5.0
+    command: --copy-service
+    environment:
+      LDAP_ORGANISATION: Corp
+      LDAP_DOMAIN: corp.local
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD:-admin}
+      LDAP_READONLY_USER: "true"
+      LDAP_READONLY_USER_USERNAME: readonly
+      LDAP_READONLY_USER_PASSWORD: ${LDAP_READONLY_PASSWORD:-readonly}
+    volumes:
+      - ./shared/ldap:/container/service/slapd/assets/config/bootstrap/ldif/custom:ro
+
+  ollama:
+    image: ollama/ollama:0.12.3
+    volumes:
+      - ollama:/root/.ollama
+    # With an NVIDIA GPU, uncomment for much faster answers:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  ollama-pull:
+    image: ollama/ollama:0.12.3
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-qwen2.5-coder:7b}"]
+    depends_on: [ollama]
+    restart: on-failure
+
+  ai-service:
+    build: ./shared/ai-service
+    image: poc-ai-service:local
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:7b}
+      DATA_DB_DSN_TEMPLATE: postgresql://ai_{role}:ai_reader@sample-db:5432/sales
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-change-me}
+    depends_on:
+      sample-db: { condition: service_healthy }
+
+  # --- proof of concept 1: Metabase open source -----------------------------
+  metabase:
+    profiles: [metabase]
+    image: metabase/metabase:v0.56.10
+    ports: ["3000:3000"]
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+      MB_SITE_URL: ${MB_PUBLIC_URL:-http://localhost:3000}
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - metabase-data:/metabase-data
+    depends_on:
+      sample-db: { condition: service_healthy }
+
+  metabase-setup:
+    profiles: [metabase]
+    image: poc-portal:local
+    build: ./portal
+    working_dir: /setup
+    command: ["python", "setup_metabase.py"]
+    environment:
+      <<: *ldap-env
+      MB_URL: http://metabase:3000
+      MB_ADMIN_PASSWORD: ${MB_ADMIN_PASSWORD:-Adm1n-Passw0rd!}
+    volumes:
+      - ./metabase/setup_metabase.py:/setup/setup_metabase.py:ro
+      - metabase-config:/config
+    depends_on: [metabase]
+    restart: on-failure
+
+  portal-metabase:
+    profiles: [metabase]
+    image: poc-portal:local
+    build: ./portal
+    ports: ["8081:8080"]
+    environment:
+      <<: *ldap-env
+      BI_BACKEND: metabase
+      MB_PUBLIC_URL: ${MB_PUBLIC_URL:-http://localhost:3000}
+      AI_SERVICE_URL: http://ai-service:8000
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-change-me}
+      PORTAL_SESSION_SECRET: ${PORTAL_SESSION_SECRET:-change-me-metabase}
+      AUDIT_DB: /data/audit.db
+    volumes:
+      - metabase-config:/config:ro
+      - portal-metabase-data:/data
+
+  # --- proof of concept 2: Apache Superset ----------------------------------
+  superset-init:
+    profiles: [superset]
+    image: poc-superset:local
+    build: ./superset
+    command:
+      - sh
+      - -c
+      - >
+        superset db upgrade &&
+        superset init &&
+        (superset fab create-admin --username $${SUPERSET_USER} --password $${SUPERSET_PASSWORD}
+        --firstname Portal --lastname Service --email portal@corp.local || true)
+    environment: &superset-env
+      <<: *ldap-env
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-change-me-to-a-long-random-string}
+      SUPERSET_AUTH: ${SUPERSET_AUTH:-ldap}
+      # With SUPERSET_AUTH=ldap the portal signs in as the directory account
+      # svc-portal; with "db" it uses the local account created above.
+      SUPERSET_USER: ${SUPERSET_USER:-svc-portal}
+      SUPERSET_PASSWORD: ${SUPERSET_PASSWORD:-Passw0rd!}
+      SUPERSET_PROVIDER: ${SUPERSET_PROVIDER:-ldap}
+    volumes: &superset-volumes
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./superset/setup_superset.py:/app/setup/setup_superset.py:ro
+      - superset-home:/app/superset_home
+      - superset-config:/config
+    depends_on: [sample-db, ldap]
+
+  superset:
+    profiles: [superset]
+    image: poc-superset:local
+    build: ./superset
+    ports: ["8088:8088"]
+    environment: *superset-env
+    volumes: *superset-volumes
+    depends_on:
+      superset-init: { condition: service_completed_successfully }
+
+  superset-setup:
+    profiles: [superset]
+    image: poc-superset:local
+    build: ./superset
+    command: ["python", "/app/setup/setup_superset.py"]
+    environment:
+      <<: *superset-env
+      SUPERSET_URL: http://superset:8088
+    volumes: *superset-volumes
+    depends_on: [superset]
+    restart: on-failure
+
+  portal-superset:
+    profiles: [superset]
+    image: poc-portal:local
+    build: ./portal
+    ports: ["8082:8080"]
+    environment:
+      <<: *ldap-env
+      BI_BACKEND: superset
+      SUPERSET_URL: http://superset:8088
+      SUPERSET_PUBLIC_URL: ${SUPERSET_PUBLIC_URL:-http://localhost:8088}
+      SUPERSET_USER: ${SUPERSET_USER:-svc-portal}
+      SUPERSET_PASSWORD: ${SUPERSET_PASSWORD:-Passw0rd!}
+      SUPERSET_PROVIDER: ${SUPERSET_PROVIDER:-ldap}
+      AI_SERVICE_URL: http://ai-service:8000
+      AI_SERVICE_TOKEN: ${AI_SERVICE_TOKEN:-change-me}
+      PORTAL_SESSION_SECRET: ${PORTAL_SESSION_SECRET:-change-me-superset}
+      AUDIT_DB: /data/audit.db
+    volumes:
+      - superset-config:/config:ro
+      - portal-superset-data:/data
+
+volumes:
+  sample-db:
+  ollama:
+  metabase-data:
+  metabase-config:
+  superset-config:
+  superset-home:
+  portal-metabase-data:
+  portal-superset-data:

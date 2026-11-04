@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}پورتال گزارش‌ها{% endblock %}</title>
+  <style>
+    :root { --bg: #f5f6f8; --card: #fff; --text: #1d2430; --muted: #687385; --accent: #2f6fde; --border: #e1e5ea; --danger: #c0392b; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #14171c; --card: #1d2128; --text: #e7eaee; --muted: #9aa3af; --accent: #6b9cff; --border: #2d333c; --danger: #ff7b6b; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Tahoma, "Vazirmatn", system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; background: var(--card); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    header .who { color: var(--muted); font-size: 14px; }
+    main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+    h1 { font-size: 18px; margin: 0; } h2 { font-size: 16px; margin: 0 0 12px; }
+    button, .btn { background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 8px 16px; font: inherit; cursor: pointer; text-decoration: none; }
+    button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    input, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font: inherit; background: var(--bg); color: var(--text); }
+    .error { color: var(--danger); }
+    .muted { color: var(--muted); font-size: 13px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; background: var(--bg); border: 1px solid var(--border); font-size: 12px; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: right; vertical-align: top; }
+    .scroll { overflow-x: auto; }
+    code, pre { direction: ltr; text-align: left; font-family: ui-monospace, monospace; font-size: 12px; }
+    pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+{% block body %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,69 @@
+# Test directory that stands in for Active Directory.
+# departmentNumber holds the branch a user may see; "*" means every branch.
+# Every password is: Passw0rd!
+
+dn: ou=users,dc=corp,dc=local
+objectClass: organizationalUnit
+ou: users
+
+dn: ou=groups,dc=corp,dc=local
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=ali,ou=users,dc=corp,dc=local
+objectClass: inetOrgPerson
+uid: ali
+givenName: Ali
+cn: Ali Ahmadi
+sn: Ahmadi
+mail: ali@corp.local
+departmentNumber: tehran
+userPassword: Passw0rd!
+
+dn: uid=sara,ou=users,dc=corp,dc=local
+objectClass: inetOrgPerson
+uid: sara
+givenName: Sara
+cn: Sara Karimi
+sn: Karimi
+mail: sara@corp.local
+departmentNumber: isfahan
+userPassword: Passw0rd!
+
+dn: uid=reza,ou=users,dc=corp,dc=local
+objectClass: inetOrgPerson
+uid: reza
+givenName: Reza
+cn: Reza Moradi
+sn: Moradi
+mail: reza@corp.local
+departmentNumber: shiraz
+userPassword: Passw0rd!
+
+dn: uid=mina,ou=users,dc=corp,dc=local
+objectClass: inetOrgPerson
+uid: mina
+givenName: Mina
+cn: Mina Rahimi
+sn: Rahimi
+mail: mina@corp.local
+departmentNumber: *
+userPassword: Passw0rd!
+
+# Service account the portal uses to talk to Superset when Superset itself
+# signs users in with LDAP. It has no branch, so it cannot use the portal.
+dn: uid=svc-portal,ou=users,dc=corp,dc=local
+objectClass: inetOrgPerson
+uid: svc-portal
+givenName: Portal
+cn: Portal Service
+sn: Service
+mail: svc-portal@corp.local
+userPassword: Passw0rd!
+
+# Analysts: may sign in to Metabase / Superset directly and build dashboards.
+dn: cn=bi-analysts,ou=groups,dc=corp,dc=local
+objectClass: groupOfNames
+cn: bi-analysts
+member: uid=mina,ou=users,dc=corp,dc=local
+member: uid=svc-portal,ou=users,dc=corp,dc=local

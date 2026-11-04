@@ -1,0 +1,9 @@
+# Make OpenLDAP behave like Active Directory: groups list members in "member"
+# and each user gets a "memberOf" attribute.
+dn: olcOverlay={0}memberof,olcDatabase={1}mdb,cn=config
+changetype: modify
+replace: olcMemberOfGroupOC
+olcMemberOfGroupOC: groupOfNames
+-
+replace: olcMemberOfMemberAD
+olcMemberOfMemberAD: member
