@@ -28,7 +28,9 @@
   (collections/create-library-collection!))
 
 (defn- add-here-and-below [collection]
-  (let [descendent-ids (map :id (collection/descendants-flat collection false))
+  (let [descendent-ids (map :id (collection/descendants-flat collection
+                                                             false
+                                                             (collection/visible-collection-filter-clause :id)))
         ;; Library questions are only ever dashboard questions, which aren't collection items
         below-card-types (disj (library.db/card-types-in-collections descendent-ids) :question)
         below-tables? (library.db/published-table-in-collections? descendent-ids)
