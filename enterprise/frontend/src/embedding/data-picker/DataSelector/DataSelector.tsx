@@ -782,11 +782,26 @@ export class UnconnectedDataSelector extends Component<
         }
       },
       [TABLE_STEP]: () => {
-        if (this.state.selectedSchemaId != null) {
-          return this.props.fetchSchemaTables(this.state.selectedSchemaId);
-        } else if (this.state.selectedSchema?.id != null) {
-          return this.props.fetchSchemaTables(this.state.selectedSchema.id);
+        const {
+          selectedDatabaseId,
+          selectedSchemaId: chosenSchemaId,
+          selectedSchema: loadedSchema,
+        } = this.state;
+        // A chosen schema that may not be loaded yet, or the reopened table's
+        // schema
+        const listedSchemaId = chosenSchemaId ?? loadedSchema?.id;
+        // No schema, so no tables to list
+        if (listedSchemaId == null) {
+          return;
         }
+        // The header and back need the schema list; a reopened table, or a
+        // schema the caller set, opens here without the schema step loading it
+        return Promise.all([
+          selectedDatabaseId != null
+            ? this.props.fetchSchemas(selectedDatabaseId)
+            : undefined,
+          this.props.fetchSchemaTables(listedSchemaId),
+        ]);
       },
     };
 

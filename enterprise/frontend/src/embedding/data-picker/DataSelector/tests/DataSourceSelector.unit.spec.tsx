@@ -17,11 +17,13 @@ import { getNextId } from "__support__/utils";
 import { ROOT_COLLECTION } from "metabase/common/collections/constants";
 import { reinitialize } from "metabase/plugins";
 import type { EmbeddingEntityType } from "metabase/redux/store/embedding-data-picker";
+import { defer } from "metabase/utils/promise";
 import {
   SAVED_QUESTIONS_VIRTUAL_DB_ID,
   getQuestionVirtualTableId,
 } from "metabase-lib/v1/metadata/utils/saved-questions";
 import type {
+  Card,
   Collection,
   Database,
   SearchModel,
@@ -402,6 +404,54 @@ describe("DataSourceSelector", () => {
       expect(await screen.findByText("Finance")).toBeInTheDocument();
       expect(screen.getByText("Accounting")).toBeInTheDocument();
     });
+
+    it("should show the schema and return to the schema list when going back from a reopened table in a database with two schemas", async () => {
+      const databases = [createSampleDatabase(), WAREHOUSE_DATABASE];
+      const warehouseWithoutTables = {
+        ...WAREHOUSE_DATABASE,
+        tables: undefined,
+      };
+      // Like the app's responses, the database list and the table's metadata leave out
+      // the database's tables, so only the schema list can tell there are two schemas
+      fetchMock.get({
+        url: "path:/api/database",
+        query: { saved: true },
+        response: {
+          data: databases.map((database) => ({
+            ...database,
+            tables: undefined,
+          })),
+          total: databases.length,
+        },
+      });
+      setupTableQueryMetadataEndpoint(
+        createMockTable({
+          id: WAREHOUSE_PAYMENTS_TABLE_ID,
+          db_id: WAREHOUSE_DB_ID,
+          schema: "Accounting",
+          display_name: "Payments",
+          db: warehouseWithoutTables,
+        }),
+      );
+      setup({
+        ...setupOpts,
+        databases,
+        selectedTable: {
+          id: WAREHOUSE_PAYMENTS_TABLE_ID,
+          databaseId: WAREHOUSE_DB_ID,
+        },
+      });
+
+      expect(await screen.findByText("Payments")).toBeInTheDocument();
+      expect(await screen.findByTestId("source-schema")).toHaveTextContent(
+        "Accounting",
+      );
+      await userEvent.click(screen.getByTestId("source-database"));
+
+      expect(await screen.findByText("Finance")).toBeInTheDocument();
+      expect(screen.getByText("Accounting")).toBeInTheDocument();
+      expect(screen.queryByText("Payments")).not.toBeInTheDocument();
+    });
   });
 
   describe("both models and tables are available", () => {
@@ -447,7 +497,8 @@ describe("DataSourceSelector", () => {
         name: "Orders model",
         type: "model",
       });
-      fetchMock.get(`path:/api/card/${model.id}`, model, { delay: 500 });
+      const cardResponse = defer<Card>();
+      fetchMock.get(`path:/api/card/${model.id}`, () => cardResponse.promise);
       setupTableQueryMetadataEndpoint(
         createMockTable({
           id: getQuestionVirtualTableId(model.id),
@@ -468,8 +519,13 @@ describe("DataSourceSelector", () => {
           true,
         ),
       );
-      expect(screen.queryByText("Saved Questions")).not.toBeInTheDocument();
-
+      try {
+        expect(screen.queryByText("Saved Questions")).not.toBeInTheDocument();
+        expect(screen.queryByText("Sample Database")).not.toBeInTheDocument();
+      } finally {
+        // A response left pending hangs the cleanup after a failed assertion
+        cardResponse.resolve(model);
+      }
       expect(await screen.findByText("Models")).toBeInTheDocument();
       expect(screen.queryByText("Saved Questions")).not.toBeInTheDocument();
     });
