@@ -22,6 +22,7 @@
 (mr/def ::custom-viz-plugin.update
   "What an update (or insert) of a CustomVizPlugin accepts: every column of `:custom_viz_plugin` except `id`, all optional."
   [:map {:closed true}
+   [:entity_id        {:optional true} [:maybe :string]]
    [:identifier       {:optional true} [:maybe :string]]
    [:display_name     {:optional true} [:maybe :string]]
    [:status           {:optional true} [:maybe [:or :keyword :string]]]

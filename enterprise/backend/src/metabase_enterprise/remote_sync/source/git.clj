@@ -255,6 +255,18 @@
                       (tree-children tree-walk)))))))
           []))))
 
+(defn read-bytes
+  "Reads the raw bytes of a specific file from the git snapshot.
+
+  Takes a GitSnapshot containing a :git Git instance and :version specifying which commit to read from, and a path
+  string indicating the relative path to the file from the repository root.
+
+  Returns the file contents as a byte array, or nil if the file does not exist at the specified path."
+  ^bytes [{:keys [^Git git ^String version]} ^String path]
+  (let [repo (.getRepository git)]
+    (when-let [object-id (.resolve repo (str version ":" path))]
+      (.getBytes (.open repo object-id)))))
+
 (defn read-file
   "Reads the contents of a specific file from the git snapshot.
 
@@ -262,11 +274,8 @@
   string indicating the relative path to the file from the repository root.
 
   Returns the file contents as a UTF-8 string, or nil if the file does not exist at the specified path."
-  [{:keys [^Git git ^String version]} ^String path]
-  (let [repo (.getRepository git)]
-    (when-let [object-id (.resolve repo (str version ":" path))]
-      (let [loader (.open repo object-id)]
-        (String. (.getBytes loader) "UTF-8")))))
+  [snapshot ^String path]
+  (some-> (read-bytes snapshot path) (String. "UTF-8")))
 
 (defn changed-files
   "Paths whose blob differs between commit `from-version` and this snapshot's `version`, classified into
@@ -407,7 +416,7 @@
 (defrecord GitCommit [snapshot inserter reader rev-walk index editor parent-id parent-tree-id tree-id]
   source.p/CommitBuilder
   (stage-upsert! [_ {:keys [^String path content]}]
-    (let [blob-id (.insert ^ObjectInserter inserter Constants/OBJ_BLOB (.getBytes ^String content "UTF-8"))]
+    (let [blob-id (.insert ^ObjectInserter inserter Constants/OBJ_BLOB (source.p/content-bytes content))]
       (.add ^DirCacheEditor editor
             (proxy [DirCacheEditor$PathEdit] [path]
               (apply [^DirCacheEntry entry]
@@ -554,6 +563,9 @@
 
   (read-file [this path]
     (read-file this path))
+
+  (read-bytes [this path]
+    (read-bytes this path))
 
   (open-commit [this]
     (open-commit* this))

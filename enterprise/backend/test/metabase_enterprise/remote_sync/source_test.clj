@@ -41,6 +41,7 @@
       (list-files [_] (vec (keys by-path)))
       (list-dir [_ p] (source/paths->children (keys by-path) p))
       (read-file [_ p] (get by-path p))
+      (read-bytes [_ p] (some-> (get by-path p) source.p/content-bytes))
       (open-commit [_]
         (let [staged (atom [])]
           (reify source.p/CommitBuilder

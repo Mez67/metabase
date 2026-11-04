@@ -12,6 +12,7 @@
    [metabase.api.macros :as api.macros]
    [metabase.api.routes.common :refer [+auth]]
    [metabase.events.core :as events]
+   [metabase.remote-sync.core :as remote-sync]
    [metabase.server.streaming-response :as sr]
    [metabase.util.http :as u.http]
    [metabase.util.log :as log]
@@ -105,6 +106,12 @@
   [plugin]
   (nil? (:bundle_hash plugin)))
 
+(defn- check-editable!
+  "Throws a 403 when `plugin` is read-only under remote sync: a bundled plugin on a read-only instance comes from
+  the repository, so it can only change there. Dev-only plugins are never synced and stay editable."
+  [plugin]
+  (api/check-403 (remote-sync/model-editable? :model/CustomVizPlugin plugin)))
+
 (defn- plugin-warnings
   "Warnings for a plugin. Dev-only plugins get no version warnings, nor do error plugins: they have no manifest to
    derive them from."
@@ -161,6 +168,7 @@
     (try
       (let [bundle-bytes (Files/readAllBytes (.toPath tempfile))
             validated    (cache/validate-bundle! bundle-bytes)
+            _            (check-editable! {:bundle_hash (:hash validated)})
             identifier   (get-in validated [:manifest :name])
             _            (when-let [error (manifest/directory-name-error identifier)]
                            (throw (ex-info error {:status-code 400})))
@@ -236,8 +244,8 @@
   "Remove a custom visualization plugin and evict its on-disk cache."
   [{:keys [id]} :- [:map {:closed true} [:id ms/PositiveInt]]]
   (let [plugin (api/write-check (custom-viz-plugin.db/custom-viz-plugin id))]
+    (check-editable! plugin)
     (custom-viz-plugin.db/delete-plugin! id)
-    (cache/purge-plugin-cache! plugin)
     (events/publish-event! :event/custom-viz-plugin-delete {:object  plugin
                                                             :user-id api/*current-user-id*})
     nil))
@@ -268,6 +276,7 @@
    _query-params
    {:keys [file]} :- BundleUploadParts]
   (let [existing (api/write-check (custom-viz-plugin.db/custom-viz-plugin id))
+        _        (check-editable! existing)
         _        (api/check-400 (nil? (manifest/identifier-error (:identifier existing)))
                                 (format (str "This plugin's identifier (\"%s\") contains \":\", which is no longer allowed. "
                                              "Delete the plugin and upload the bundle under a name without \":\".")

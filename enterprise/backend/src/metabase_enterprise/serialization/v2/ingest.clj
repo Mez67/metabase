@@ -113,21 +113,13 @@
 
 (def shared-top-level-paths
   "The [[legal-top-level-paths]] whose directories also hold files serialization does not own, such as a data app's
-  source code, to the name of the entity files in them."
+  or a custom viz plugin's source code, to the name of the entity files in them."
   {"data_apps"          "data_app.yaml"
    "custom_viz_plugins" "custom_viz_plugin.yaml"})
 
-(def unsynced-top-level-paths
-  "Paths preserved by remote sync; their entities require explicit serialization import and export."
-  #{"custom_viz_plugins"})
-
-(def remote-synced-top-level-paths
-  "The [[legal-top-level-paths]] remote sync imports from and exports to."
-  (apply disj legal-top-level-paths unsynced-top-level-paths))
-
 (def replaced-top-level-paths
-  "The [[remote-synced-top-level-paths]] a full export may replace wholesale."
-  (apply disj remote-synced-top-level-paths (keys shared-top-level-paths)))
+  "The [[legal-top-level-paths]] a full export may replace wholesale."
+  (apply disj legal-top-level-paths (keys shared-top-level-paths)))
 
 (defn entity-file-path?
   "Whether the `/`-separated relative `path` names an entity YAML file: a `.yaml` file that isn't a dotfile under one

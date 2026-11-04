@@ -2,6 +2,8 @@
   (:require
    [methodical.core :as methodical]))
 
+(set! *warn-on-reflection* true)
+
 (defprotocol Source
   (branches [source]
     "Gets all available branch names from the remote source.
@@ -100,6 +102,14 @@
 
     Returns the file contents as a string, or nil if the file doesn't exist.")
 
+  (read-bytes [snapshot path]
+    "Reads the contents of a file from the snapshot as its raw bytes, for a resource file that is not text (see
+    `metabase.models.serialization/binary-resources?`).
+
+    Takes a SourceSnapshot instance implementing this protocol and a path (the relative path to the file to read).
+
+    Returns the file contents as a byte array, or nil if the file doesn't exist.")
+
   (open-commit [snapshot]
     "Begin building one commit incrementally; returns a CommitBuilder.")
 
@@ -120,7 +130,7 @@
   throws, so callers should wrap staging in `try` and `abort-commit!` in the `catch`/`finally`. A builder
   left open leaks those resources; the lifecycle is the caller's responsibility, not the builder's."
   (stage-upsert! [commit file-spec]
-    "Stage one file (a `{:path :content}` map) into the commit. Returns nil.")
+    "Stage one file (a `{:path :content}` map, its `:content` a string or a byte array) into the commit. Returns nil.")
   (stage-delete! [commit path]
     "Stage removal of `path` from the commit. Returns nil.")
   (replace-all! [commit]
@@ -139,6 +149,13 @@
     the push proceeds.")
   (abort-commit! [commit]
     "Release the commit's resources without committing or pushing. Returns nil."))
+
+(defn content-bytes
+  "The bytes of a file spec's `content`: a byte array as is, a string as UTF-8."
+  ^bytes [content]
+  (if (bytes? content)
+    content
+    (.getBytes ^String content "UTF-8")))
 
 (defprotocol Diffable
   "Optional capability for snapshots that can cheaply report which files changed since a prior version.

@@ -405,7 +405,7 @@
   state or drop captured dirty markers (see [[import-merged!]])."
   [snapshot report sync-timestamp & {:keys [finalize!]}]
   (report 0.05 {:force? true})
-  (let [path-filters        (mapv #(re-pattern (str % "/.*")) serialization/remote-synced-top-level-paths)
+  (let [path-filters        (mapv #(re-pattern (str % "/.*")) serialization/legal-top-level-paths)
         base-ingestable     (source.p/->ingestable snapshot {:path-filters path-filters})
         has-transforms?     (snapshot-has-transforms? base-ingestable)
         ingestable-snapshot (source.ingestable/wrap-progress-ingestable report [0.05 0.7] base-ingestable)
@@ -448,16 +448,20 @@
 
 (def ^:private full-import-models
   "Models whose change forces a full import on the incremental fast-path: Collection (a rename moves every
-  descendant's file, a delete cascades to its contents) and the feature models (their presence drives the
-  remote-sync-transforms / library settings, which need whole-snapshot knowledge to toggle correctly)."
-  #{"Collection" "DataApp" "Transform" "TransformTag" "PythonLibrary" "NativeQuerySnippet"})
+  descendant's file, a delete cascades to its contents), the feature models (their presence drives the
+  remote-sync-transforms / library settings, which need whole-snapshot knowledge to toggle correctly), and the
+  models whose YAML files carry resource files (the incremental ingestable is filtered to the changed YAML paths, so
+  it could not read the resources beside them)."
+  (into #{"Collection" "Transform" "TransformTag" "PythonLibrary" "NativeQuerySnippet"}
+        (keep (fn [spec] (when (:resources? spec) (:model-type spec))))
+        (vals spec/remote-sync-specs)))
 
 (defn- managed-path?
-  "True for a file under a directory remote sync manages."
+  "True for a file under a managed directory."
   [^String path]
   (and (not (str/starts-with? path "."))
        (when-let [i (str/index-of path "/")]
-         (contains? serialization/remote-synced-top-level-paths (subs path 0 i)))))
+         (contains? serialization/legal-top-level-paths (subs path 0 i)))))
 
 (defn- legal-yaml-path?
   "True for a managed-directory `.yaml` entity file — the only changed paths the importer acts on."
@@ -651,7 +655,7 @@
             force-deletion?       (if (nil? force-deletion?) force? force-deletion?)
             finalize!             (fn [] (remote-sync.task/set-version! task-id snapshot-version))
             report                (import-progress-reporter task-id)
-            path-filters          (mapv #(re-pattern (str % "/.*")) serialization/remote-synced-top-level-paths)
+            path-filters          (mapv #(re-pattern (str % "/.*")) serialization/legal-top-level-paths)
             ;; First-import conflicts only block the first import; deletion conflicts block every import (an
             ;; already-configured instance must not silently delete unsynced transforms). The get-conflicts tree scan
             ;; is itself deferred so it only runs when one of the gates is open (e.g. a forced import with

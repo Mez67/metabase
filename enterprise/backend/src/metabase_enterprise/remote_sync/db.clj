@@ -14,7 +14,8 @@
 (def ^:private ConditionKey
   "The column keys used in the `:conditions` / `:cascade-filter` / `:removal-conditions` of a remote-sync model
   spec (see `metabase-enterprise.remote-sync.spec`)."
-  [:enum :exploration_id :built_in_type :is_default :entity_id :collection_id :model_id :archived :archived_at])
+  [:enum :exploration_id :built_in_type :is_default :entity_id :collection_id :model_id :archived :archived_at
+   :bundle_hash])
 
 (def ^:private Conditions
   "A map of column to value (possibly nil) or Toucan 2 operator-vector value, or nil for none."
@@ -76,7 +77,7 @@
 (mu/defn entity-id-where :- [:maybe :string]
   "The `:entity_id` of the instance of `model-key` whose `column` equals `value`, or nil."
   [model-key :- :keyword
-   column    :- [:enum :name :term]
+   column    :- [:enum :name :term :identifier]
    value     :- :string]
   (t2/select-one-fn :entity_id model-key column value))
 
@@ -88,15 +89,15 @@
   (apply t2/count model-key (mapcat identity conditions)))
 
 (defn- removal-condition-exprs
-  "Turns a spec's removal-conditions map into `:where` fragments: an `:entity_id` entry whose value is an
-  `[op value]` pair becomes `[op :entity_id value]`; any other entry with a vector value becomes `[:in key value]`;
+  "Turns a spec's removal-conditions map into `:where` fragments: an entry whose value is an `[op value]` pair (a
+  keyword operator first) becomes `[op key value]`; any other entry with a vector value becomes `[:in key value]`;
   a scalar value becomes `[:= key value]`."
   [removal-conditions]
   (for [[k v] removal-conditions]
     (cond
-      (and (= k :entity_id) (vector? v)) (let [[op value] v] [op :entity_id value])
-      (vector? v)                        [:in k v]
-      :else                              [:= k v])))
+      (and (vector? v) (keyword? (first v))) (let [[op value] v] [op k value])
+      (vector? v)                            [:in k v]
+      :else                                  [:= k v])))
 
 (defn- scope-expr
   "The `:where` fragment keeping the rows in `synced-collection-ids` or matching `unscoped-conditions`, or nil when
@@ -163,7 +164,7 @@
   "Up to `limit` values of `name-col` from the rows [[unsynced-instance-count]] counts."
   [model-key    :- :keyword
    model-type   :- :string
-   name-col     :- [:enum :name :term]
+   name-col     :- [:enum :name :term :identifier]
    removal-opts :- RemovalOpts
    limit        :- ms/PositiveInt]
   (t2/select-fn-vec name-col model-key {:where (unsynced-instance-expr model-key model-type removal-opts)

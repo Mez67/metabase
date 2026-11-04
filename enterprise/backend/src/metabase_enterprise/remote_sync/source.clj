@@ -13,7 +13,9 @@
    [metabase.models.serialization :as serdes]
    [metabase.settings.core :as setting]
    [metabase.util.yaml :as yaml]
-   [methodical.core :as methodical]))
+   [methodical.core :as methodical])
+  (:import
+   (java.security MessageDigest)))
 
 (set! *warn-on-reflection* true)
 
@@ -55,6 +57,10 @@
     (when (some (fn [path-filter] (re-matches path-filter path)) path-filters)
       (source.p/read-file original-snapshot path)))
 
+  (read-bytes [_ path]
+    (when (some (fn [path-filter] (re-matches path-filter path)) path-filters)
+      (source.p/read-bytes original-snapshot path)))
+
   (open-commit [_]
     (throw (UnsupportedOperationException. "WrappingSnapshot is a read-only ingestion view, not a write target.")))
 
@@ -94,14 +100,19 @@
   (cons (select-keys file-spec [:path :content]) (:resources file-spec)))
 
 (defn content-hash
-  "SHA-256 (hex) of a serialized YAML `content` string."
-  [^String content]
-  (codecs/bytes->hex (buddy-hash/sha256 content)))
+  "SHA-256 (hex) of a file's `content`, a string or a byte array."
+  [content]
+  (codecs/bytes->hex (buddy-hash/sha256 (source.p/content-bytes content))))
 
 (defn file-spec-hash
   "SHA-256 (hex) of the content of a `file-spec` from [[entity->file-spec]], including its resource files."
   [{:keys [content resources]}]
-  (content-hash (apply str content (mapcat (juxt :path :content) resources))))
+  (let [digest (MessageDigest/getInstance "SHA-256")]
+    (.update digest (source.p/content-bytes content))
+    (doseq [{:keys [path content]} resources]
+      (.update digest (source.p/content-bytes path))
+      (.update digest (source.p/content-bytes content)))
+    (codecs/bytes->hex (.digest digest))))
 
 (defn row->file-info
   "The repo `:path` and the SHA-256 (hex) `:content-hash` of the serialized YAML for the entity named by `row`
@@ -145,12 +156,9 @@
                 cat)
           stream)))
 
-(defn- managed-path?
-  "Whether `path` is under a directory remote sync manages; the files of an unsynced directory such as
-  `custom_viz_plugins/` are never owned, so a full export keeps them and a merge ignores them."
-  [^String path]
+(defn- managed-path? [^String path]
   (when-let [idx (str/index-of path "/")]
-    (contains? serialization/remote-synced-top-level-paths (subs path 0 idx))))
+    (contains? serialization/legal-top-level-paths (subs path 0 idx))))
 
 (defn- shared-path? [^String path]
   (when-let [idx (str/index-of path "/")]
@@ -161,31 +169,41 @@
     (subs path 0 idx)))
 
 (defn- declared-resources
-  "The paths of the resource files that the entity YAML files directly in directory `dir` of `snapshot` declare."
+  "The resource files that the entity YAML files directly in directory `dir` of `snapshot` declare: a map of path to
+  whether the file is read as bytes rather than text (see [[serdes/binary-resources?]])."
   [snapshot dir]
-  (into #{}
+  (into {}
         (comp (filter serialization/entity-file-path?)
               (mapcat (fn [path]
                         (try
-                          (let [entity (yaml/parse-string (source.p/read-file snapshot path)
-                                                          {:key-fn serialization/parse-key})]
-                            (map #(str dir "/" %)
-                                 (serdes/resource-paths entity)))
+                          (let [entity  (yaml/parse-string (source.p/read-file snapshot path)
+                                                           {:key-fn serialization/parse-key})
+                                binary? (serdes/binary-resources? entity)]
+                            (map #(vector (str dir "/" %) binary?) (serdes/resource-paths entity)))
                           (catch Exception _
                             nil)))))
         (source.p/list-dir snapshot dir)))
+
+(defn- owned-files
+  "The managed paths among `paths` that serialization owns in `snapshot`, as `{:path :binary?}`: entity YAML files,
+  and the resource files that a YAML file in one of their ancestor directories declares."
+  [snapshot paths]
+  (let [resources (memoize #(declared-resources snapshot %))]
+    (into []
+          (keep (fn [path]
+                  (when (managed-path? path)
+                    (if (serialization/entity-file-path? path)
+                      {:path path :binary? false}
+                      (when-some [[_ binary?] (some #(find (resources %) path)
+                                                    (take-while some? (iterate parent-dir (parent-dir path))))]
+                        {:path path :binary? binary?})))))
+          paths)))
 
 (defn owned-paths
   "The managed paths among `paths` that serialization owns in `snapshot`: entity YAML files, and the resource files
   that a YAML file in one of their ancestor directories declares."
   [snapshot paths]
-  (let [resources (memoize #(declared-resources snapshot %))]
-    (filterv (fn [path]
-               (and (managed-path? path)
-                    (or (serialization/entity-file-path? path)
-                        (some #(contains? (resources %) path)
-                              (take-while some? (iterate parent-dir (parent-dir path)))))))
-             paths)))
+  (mapv :path (owned-files snapshot paths)))
 
 (defn replace-managed-files!
   "Stage the removal of every file serialization owns in `snapshot` into `commit`, so the files staged next replace
@@ -200,10 +218,12 @@
   shape produced by [[serialize-specs]]. Used to read the merge base and remote-tip trees for merging."
   [snapshot]
   (into []
-        (keep (fn [path]
-                (when-let [content (source.p/read-file snapshot path)]
+        (keep (fn [{:keys [path binary?]}]
+                (when-let [content (if binary?
+                                     (source.p/read-bytes snapshot path)
+                                     (source.p/read-file snapshot path))]
                   {:path path :content content})))
-        (owned-paths snapshot (source.p/list-files snapshot))))
+        (owned-files snapshot (source.p/list-files snapshot))))
 
 (defn compute-merge
   "Runs the entity-identity 3-way merge of local state against the remote tip, without writing. Returns
@@ -232,6 +252,7 @@
       (list-files [_] (vec (keys by-path)))
       (list-dir [_ path] (paths->children (keys by-path) path))
       (read-file [_ path] (get by-path path))
+      (read-bytes [_ path] (some-> (get by-path path) source.p/content-bytes))
       (open-commit [_] (throw (ex-info "in-memory merge snapshot is read-only" {})))
       (version [_] nil))))
 

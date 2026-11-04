@@ -39,7 +39,7 @@
       (when (map? exported)
         (let [ingested (ingest/read-resources
                         {:serdes/meta [{:model "CustomVizPlugin" :id identifier}]
-                         :identifier identifier :enabled true :files (vec (keys exported))}
+                         :identifier identifier :files (vec (keys exported))}
                         identifier
                         (fn [path] (when-let [^bytes content (get exported path)] (String. content "UTF-8")))
                         exported)]
@@ -142,8 +142,9 @@
 (deftest make-spec-test
   (testing "the YAML holds plugin settings and declares the unpacked bundle files"
     (let [spec (serdes/make-spec "CustomVizPlugin" {})]
-      (is (= #{:identifier :enabled} (set (:copy spec))))
-      (is (= {:enabled true} (:defaults spec)) "enabled is written only when false; absent means enabled, as on upload")
+      (is (= #{:identifier} (set (:copy spec))))
+      (is (contains? (set (:skip spec)) :enabled) "enabled is an admin's choice on each instance, as for data apps")
+      (is (contains? (set (:skip spec)) :entity_id) "the identifier is the portable identity")
       (is (= :serdes/resources (get-in spec [:transform :bundle :as])))))
   (testing "bundle transforms skip unreadable archives and pack resources deterministically"
     (let [spec     (serdes/make-spec "CustomVizPlugin" {})
@@ -184,8 +185,7 @@
   (merge {:serdes/meta      [{:model "CustomVizPlugin" :id identifier :label identifier}]
           :serdes/directory identifier
           :serdes/resources (when bundle (cache/bundle->files bundle))
-          :identifier       identifier
-          :enabled          true}
+          :identifier       identifier}
          extra))
 
 (defn- repacked-hash
@@ -234,15 +234,19 @@
                :error_message #(str/includes? % "metabase-plugin.json not found")}
               (t2/select-one :model/CustomVizPlugin :identifier "bundleless-viz"))))))
 
-(deftest load-enabled-is-owned-by-the-file-test
+(deftest load-leaves-enabled-to-the-instance-test
   (let [bundle (cv.tu/valid-bundle-bytes "toggled-viz")]
-    (testing "a file without `enabled` loads an enabled plugin, as an upload does"
+    (testing "a new plugin loads enabled, as an upload does"
       (mt/with-model-cleanup [:model/CustomVizPlugin]
-        (serdes/load-one! (dissoc (ingested-plugin "toggled-viz" bundle) :enabled) nil)
+        (serdes/load-one! (ingested-plugin "toggled-viz" bundle) nil)
         (is (true? (t2/select-one-fn :enabled :model/CustomVizPlugin :identifier "toggled-viz")))))
-    (testing "the file's `enabled` replaces what an admin set on this instance"
-      (mt/with-temp [:model/CustomVizPlugin {id :id} (active-plugin-row "toggled-viz" bundle)]
-        (serdes/load-one! (ingested-plugin "toggled-viz" bundle :enabled false) (t2/select-one :model/CustomVizPlugin :id id))
+    (testing "a plugin an admin disabled here stays disabled when its files are loaded again"
+      (mt/with-temp [:model/CustomVizPlugin {id :id} (assoc (active-plugin-row "toggled-viz" bundle) :enabled false)]
+        (serdes/load-one! (ingested-plugin "toggled-viz" bundle) (t2/select-one :model/CustomVizPlugin :id id))
+        (is (false? (t2/select-one-fn :enabled :model/CustomVizPlugin :id id)))))
+    (testing "a file that still says `enabled` is loaded without it"
+      (mt/with-temp [:model/CustomVizPlugin {id :id} (assoc (active-plugin-row "toggled-viz" bundle) :enabled false)]
+        (serdes/load-one! (ingested-plugin "toggled-viz" bundle :enabled true) (t2/select-one :model/CustomVizPlugin :id id))
         (is (false? (t2/select-one-fn :enabled :model/CustomVizPlugin :id id)))))))
 
 (deftest load-checks-the-directory-name-test

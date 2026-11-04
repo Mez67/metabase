@@ -3878,6 +3878,7 @@
            events
            models
            premium-features
+           remote-sync
            server
            settings
            util
@@ -4374,6 +4375,7 @@
    :model-imports #{:model/Action
                     :model/Card
                     :model/Collection
+                    :model/CustomVizPlugin
                     :model/Dashboard
                     :model/DataApp
                     :model/Dimension

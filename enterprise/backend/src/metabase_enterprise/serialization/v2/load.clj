@@ -137,11 +137,14 @@
        boolean))
 
 (defn- exported-with-entity-id?
-  "Returns true if entities with the given model-name should have been exported with an entity_id."
+  "Returns true if entities with the given model-name should have been exported with an entity_id: the model has the
+  column and its spec does not skip it (a CustomVizPlugin has one for remote sync but is identified by its
+  identifier)."
   [model-name]
   (when (valid-model-name-for-load? model-name)
     (let [model (t2.model/resolve-model (symbol model-name))]
-      (serdes/has-entity-id? model))))
+      (and (serdes/has-entity-id? model)
+           (not (contains? (set (:skip (serdes/make-spec model-name nil))) :entity_id))))))
 
 (defn- load-one!
   "Loads a single entity, specified by its `:serdes/meta` abstract path, into the appdb, doing some bookkeeping to

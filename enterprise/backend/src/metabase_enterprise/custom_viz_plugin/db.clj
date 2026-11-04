@@ -10,8 +10,8 @@
 
 (def non-blob-columns
   "Every CustomVizPlugin column except the raw bundle blob."
-  [:id :identifier :display_name :icon :status :error_message :enabled :manifest :metabase_version :bundle_hash
-   :dev_bundle_url :created_at :updated_at])
+  [:id :entity_id :identifier :display_name :icon :status :error_message :enabled :manifest :metabase_version
+   :bundle_hash :dev_bundle_url :created_at :updated_at])
 
 (def ^:private non-blob-model
   (into [:model/CustomVizPlugin] non-blob-columns))
@@ -49,8 +49,10 @@
 (defn- with-bundles-where
   "Build the filter for plugins with stored bundles."
   [filter-column filter-ids]
-  (cond-> [:not= :bundle_hash nil]
-    filter-column (vector :and [:in filter-column filter-ids])))
+  (let [bundled [:not= :bundle_hash nil]]
+    (if filter-column
+      [:and bundled [:in filter-column filter-ids]]
+      bundled)))
 
 (mu/defn plugin-identifiers-with-bundles :- [:sequential :string]
   "Identifiers of plugins with stored bundles."

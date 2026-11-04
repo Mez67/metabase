@@ -149,13 +149,11 @@
     (populate-cache! cache errors-atom #(ingest-all snapshot))
     (when-let [{:keys [content ^String path]} (get @cache (serialization/strip-labels serdes-path))]
       (try
-        (let [dir       (subs path 0 (inc (or (str/last-index-of path "/") -1)))
-              read-text #(source.p/read-file snapshot (str dir %))]
-          ;; no model remote sync carries has binary resources, so a snapshot reads text only
+        (let [dir (subs path 0 (inc (or (str/last-index-of path "/") -1)))]
           (serialization/read-resources (ingest-content content)
                                         (last (str/split dir #"/"))
-                                        read-text
-                                        #(some-> ^String (read-text %) (.getBytes "UTF-8"))))
+                                        #(source.p/read-file snapshot (str dir %))
+                                        #(source.p/read-bytes snapshot (str dir %))))
         (catch Exception e
           (throw (ex-info "Unable to ingest file" {:abs-path serdes-path} e))))))
 

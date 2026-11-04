@@ -38,7 +38,9 @@
 
 (doto :model/CustomVizPlugin
   (derive :metabase/model)
-  (derive :hook/timestamped?))
+  (derive :hook/timestamped?)
+  ;; remote sync tracks a plugin by `entity_id`; serialization identifies it by `identifier` (see below)
+  (derive :hook/entity-id))
 
 (t2.default-fields/define-default-fields :model/CustomVizPlugin
   custom-viz-plugin.db/non-blob-columns)
@@ -60,13 +62,19 @@
   [plugin json-generator]
   (next-method (dissoc plugin :bundle) json-generator))
 
+;; A pull deletes a plugin through the model, not the API, so the on-disk bundle cache is evicted here.
+(t2/define-before-delete :model/CustomVizPlugin
+  [plugin]
+  (cache/purge-plugin-cache! plugin))
+
 ;;; ------------------------------------------------- Serialization --------------------------------------------------
 
 ;; A plugin serializes as `custom_viz_plugins/<identifier>/custom_viz_plugin.yaml` with its bundle unpacked beside it,
 ;; laid out as `npx @metabase/custom-viz pack` archives it: `metabase-plugin.json` at the root, `dist/index.js`, and
-;; the icon the manifest names under `dist/assets/`. The YAML declares those files alongside the plugin settings.
+;; the icon the manifest names under `dist/assets/`. The YAML declares those files beside the plugin's identity.
 ;; An import packs those files back into an archive, so a plugin's files are what a repository reviews
-;; and what an instance stores.
+;; and what an instance stores. Whether a plugin is enabled is an admin's choice on each instance, as for data apps,
+;; so the YAML carries no settings at all.
 
 (def ^:private index-file
   "The resource file holding the plugin's built JavaScript, relative to its YAML file."
@@ -117,13 +125,15 @@
 
 (defmethod serdes/make-spec "CustomVizPlugin"
   [_model-name _opts]
-  {:copy      [:identifier :enabled]
+  {:copy      [:identifier]
    :skip      [;; derived from the bundle at import time (see [[bundle-columns]]), exactly as on upload
                :display_name :icon :manifest :metabase_version :bundle_hash :status :error_message
+               ;; admin-owned state of this instance
+               :enabled
                ;; dev-only plugins are never served from another instance
-               :dev_bundle_url]
-   ;; a plugin is enabled unless the file says otherwise, as an upload enables it; the column defaults the same way
-   :defaults  {:enabled true}
+               :dev_bundle_url
+               ;; remote sync's handle on this instance's row; the identifier is the portable identity
+               :entity_id]
    :transform {:bundle {:as                  :serdes/resources
                         :export-with-context export-bundle
                         :import              import-bundle}}

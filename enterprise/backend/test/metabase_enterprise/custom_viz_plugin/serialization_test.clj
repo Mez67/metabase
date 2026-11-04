@@ -87,7 +87,6 @@
 (defn- plugin-yaml [identifier & {:as extra}]
   (merge {:serdes/meta [{:model "CustomVizPlugin"}]
           :identifier  identifier
-          :enabled     true
           :files       (vec (sort (keys (plugin-files identifier))))}
          extra))
 
@@ -102,13 +101,11 @@
         (export! dump-dir)
         (let [plugin-dir (io/file dump-dir "custom_viz_plugins" "Thumbs")
               yaml-file  (io/file plugin-dir "custom_viz_plugin.yaml")]
-          (testing "YAML contains identity, enabled state, and declared resource files"
+          (testing "YAML contains identity and declared resource files, not this instance's `enabled` state"
             (is (= {:serdes/meta [{:model "CustomVizPlugin"}]
                     :identifier  "Thumbs"
-                    :enabled     false
                     :files       (vec (sort (keys files)))}
-                   (yaml/from-file yaml-file))
-                "`enabled` is written only when false"))
+                   (yaml/from-file yaml-file))))
           (testing "only declared resources are exported, byte for byte"
             (is (= (assoc (update-vals files seq) "custom_viz_plugin.yaml" (seq (file-bytes yaml-file)))
                    (files-in plugin-dir)))))))))
