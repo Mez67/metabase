@@ -16,32 +16,31 @@
 (set! *warn-on-reflection* true)
 
 (defn- bundle-files
-  "The files of a minimal plugin bundle: the manifest, the JavaScript, and an `icon.<icon-type>` asset (`\"png\"` or
-  `\"svg\"`). `manifest` is merged over a default `:icon` naming that asset by its bare file name."
-  [manifest icon-type]
-  (let [icon-file (str "icon." icon-type)
-        icon-path (str "dist/assets/" icon-file)
-        icon      (case icon-type
-                    "png" (byte-array [0 0x80 0xff])
-                    "svg" (.getBytes "<svg xmlns='http://www.w3.org/2000/svg'/>" "UTF-8"))]
-    {"metabase-plugin.json" (.getBytes ^String (json/encode (merge {:icon icon-file} manifest)) "UTF-8")
-     "dist/index.js"        (.getBytes "{}" "UTF-8")
-     icon-path              icon}))
+  "The files of a minimal plugin bundle, as bytes: the manifest, the JavaScript, and an `icon.svg` asset. `manifest`
+  is merged over a default `:icon` naming that asset by its bare file name."
+  [manifest]
+  {"metabase-plugin.json" (.getBytes ^String (json/encode (merge {:icon "icon.svg"} manifest)) "UTF-8")
+   "dist/index.js"        (.getBytes "{}" "UTF-8")
+   "dist/assets/icon.svg" (.getBytes "<svg xmlns='http://www.w3.org/2000/svg'/>" "UTF-8")})
+
+(defn- as-text
+  "`files`, a map of path to bytes, with each file as its UTF-8 text: the form the bundle takes in an export."
+  [files]
+  (update-vals files #(String. ^bytes % "UTF-8")))
 
 (deftest dot-path-bundle-round-trip-test
   (let [identifier "dot-path-viz"
-        files      (bundle-files {:name identifier :icon "./icon.png"} "png")
+        files      (bundle-files {:name identifier :icon "./icon.svg"})
         bundle     (cv.tu/make-tgz-bytes (map (fn [[path content]] [(str "./" path) content]) files))
         export     (get-in (serdes/make-spec "CustomVizPlugin" {}) [:transform :bundle :export-with-context])]
     (is (some? (cache/validate-bundle! bundle)))
     (let [exported (export {:identifier identifier} :bundle bundle)]
-      (is (= (update-vals files seq) (when (map? exported) (update-vals exported seq))))
+      (is (= (as-text files) exported))
       (when (map? exported)
         (let [ingested (ingest/read-resources
                         {:serdes/meta [{:model "CustomVizPlugin" :id identifier}]
                          :identifier identifier :files (vec (keys exported))}
                         identifier
-                        (fn [path] (when-let [^bytes content (get exported path)] (String. content "UTF-8")))
                         exported)]
           (is (= (set (keys files)) (set (keys (:serdes/resources ingested)))))
           (mt/with-temp [:model/CustomVizPlugin {id :id :as plugin} {:identifier   identifier
@@ -151,21 +150,21 @@
           export   (let [f (get-in spec [:transform :bundle :export-with-context])]
                      (fn [bundle] (f {:identifier "my-viz"} :bundle bundle)))
           import   (get-in spec [:transform :bundle :import])
-          files    (bundle-files {:name "my-viz"} "svg")]
+          files    (bundle-files {:name "my-viz"})
+          texts    (as-text files)]
       (is (= ::serdes/skip (export nil)))
       (is (= ::serdes/skip (export (.getBytes "not a tgz" "UTF-8"))) "a stored archive that can't be read is left out")
       (testing "a file that isn't there is left out of the archive"
         (is (= {"dist/index.js" (seq (get files "dist/index.js"))}
-               (update-vals (cache/bundle->files (import (assoc files "metabase-plugin.json" nil "dist/assets/icon.svg" nil)))
+               (update-vals (cache/bundle->files (import (assoc texts "metabase-plugin.json" nil "dist/assets/icon.svg" nil)))
                             seq))))
       (testing "the same files always pack to the same bytes, so the hash is stable across imports"
-        (is (= (seq (import files)) (seq (import files)))))))
+        (is (= (seq (import texts)) (seq (import texts)))))))
   (testing "resource paths come from YAML, including assets unknown to the manifest"
-    (let [paths ["metabase-plugin.json" "dist/index.js" "dist/assets/icon.svg" "dist/assets/extra.png"]
+    (let [paths ["metabase-plugin.json" "dist/index.js" "dist/assets/icon.svg" "dist/assets/extra.svg"]
           ingested {:serdes/meta [{:model "CustomVizPlugin" :id "my-viz"}]
                     :files paths}]
-      (is (= paths (serdes/resource-paths ingested)))
-      (is (true? (serdes/binary-resources? ingested)))))
+      (is (= paths (serdes/resource-paths ingested)))))
   (testing "export declares exactly the resources it writes, unpacking the bundle once"
     (let [unpack cache/bundle->files
           calls (atom 0)]
@@ -174,17 +173,17 @@
                                                         (unpack bundle))]
         (let [entity (serdes/extract-one "CustomVizPlugin" {}
                                          {:identifier "my-viz" :enabled true
-                                          :bundle (cache/files->bundle (bundle-files {:name "my-viz"} "svg"))})]
+                                          :bundle (cache/files->bundle (bundle-files {:name "my-viz"}))})]
           (is (= "my-viz" (:identifier entity)))
           (is (= (sort (keys (:serdes/resources entity))) (:files entity)))
           (is (= 1 @calls)))))))
 
 (defn- ingested-plugin
-  "Build an ingested plugin from bundle files."
+  "Build an ingested plugin from bundle files, read as text."
   [identifier ^bytes bundle & {:as extra}]
   (merge {:serdes/meta      [{:model "CustomVizPlugin" :id identifier :label identifier}]
           :serdes/directory identifier
-          :serdes/resources (when bundle (cache/bundle->files bundle))
+          :serdes/resources (when bundle (as-text (cache/bundle->files bundle)))
           :identifier       identifier}
          extra))
 
@@ -207,7 +206,7 @@
 (deftest load-insert-validates-bundle-test
   (testing "loading an exported plugin with a valid bundle makes it :active"
     (mt/with-model-cleanup [:model/CustomVizPlugin]
-      (let [bundle (cv.tu/valid-bundle-bytes "imported-viz" {:icon "chart"})]
+      (let [bundle (cv.tu/valid-bundle-bytes "imported-viz" {:icon "chart.svg"})]
         (serdes/load-one! (ingested-plugin "imported-viz" bundle) nil)
         (is (=? {:status        :active
                  :error_message nil
@@ -216,10 +215,9 @@
                 (t2/select-one :model/CustomVizPlugin :identifier "imported-viz"))))))
   (testing "loading a plugin whose files have no manifest makes it :error, keeping the files and their hash"
     (mt/with-model-cleanup [:model/CustomVizPlugin]
-      (let [script (.getBytes "{}" "UTF-8")
-            packed (cache/files->bundle {"dist/index.js" script})]
+      (let [packed (cache/files->bundle {"dist/index.js" (.getBytes "{}" "UTF-8")})]
         (serdes/load-one! (ingested-plugin "broken-viz" nil :serdes/resources {"metabase-plugin.json" nil
-                                                                               "dist/index.js"        script})
+                                                                               "dist/index.js"        "{}"})
                           nil)
         (is (=? {:status        :error
                  :error_message #(str/includes? % "metabase-plugin.json not found")
@@ -288,7 +286,7 @@
 (deftest load-update-validates-bundle-test
   (testing "re-importing over an existing plugin re-validates the new bundle"
     (let [old-bundle (cv.tu/valid-bundle-bytes "updated-viz")
-          new-bundle (cv.tu/valid-bundle-bytes "updated-viz" {:icon "star"})]
+          new-bundle (cv.tu/valid-bundle-bytes "updated-viz" {:icon "star.svg"})]
       (mt/with-temp [:model/CustomVizPlugin {id :id} (assoc (active-plugin-row "updated-viz" old-bundle)
                                                             :status        :error
                                                             :error_message "stale")]
@@ -296,7 +294,7 @@
         (is (=? {:id            id
                  :status        :active
                  :error_message nil
-                 :icon          "star"
+                 :icon          "star.svg"
                  :bundle_hash   (repacked-hash new-bundle)}
                 (t2/select-one :model/CustomVizPlugin :id id)))))))
 

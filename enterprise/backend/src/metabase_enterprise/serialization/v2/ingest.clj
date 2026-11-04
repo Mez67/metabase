@@ -13,9 +13,7 @@
    [metabase.util.memoize :as u.memo]
    [metabase.util.yaml :as yaml]
    [potemkin.types :as p])
-  (:import
-   (java.io File)
-   (java.nio.file Files)))
+  (:import (java.io File)))
 
 (set! *warn-on-reflection* true)
 
@@ -93,17 +91,17 @@
     (throw (ex-info (format "Invalid resource file path: %s" path) {:path path}))))
 
 (defn read-resources
-  "Attach an entity's resource files and directory name for import."
-  [entity ^String directory-name read-text read-bytes]
+  "The ingested `entity` with each of its [[serdes/resource-paths]] read by `read-fn` into `:serdes/resources`, and
+  the name of the directory it was read from as `:serdes/directory`."
+  [entity ^String directory-name read-fn]
   (if-let [paths (seq (serdes/resource-paths entity))]
-    (let [read-fn (if (serdes/binary-resources? entity) read-bytes read-text)]
-      (assoc entity
-             :serdes/directory directory-name
-             :serdes/resources (into {}
-                                     (map (fn [path]
-                                            (check-resource-path! path)
-                                            [path (read-fn path)]))
-                                     paths)))
+    (assoc entity
+           :serdes/directory directory-name
+           :serdes/resources (into {}
+                                   (map (fn [path]
+                                          (check-resource-path! path)
+                                          [path (read-fn path)]))
+                                   paths))
     entity))
 
 (def legal-top-level-paths
@@ -212,15 +210,13 @@
           {:serdes/meta serdes-meta :key kw-id :value (get settings kw-id)})
         (when-let [^File file (get @cache (strip-labels serdes-meta))]
           (try
-            (let [dir      (.getParentFile file)
-                  resource (fn [^String path]
-                             (let [f (io/file dir path)]
-                               (when (.isFile f)
-                                 f)))]
+            (let [dir (.getParentFile file)]
               (read-resources (ingest-file file)
                               (.getName dir)
-                              #(some-> (resource %) slurp)
-                              #(some-> ^File (resource %) .toPath Files/readAllBytes)))
+                              (fn [^String path]
+                                (let [resource (io/file dir path)]
+                                  (when (.isFile resource)
+                                    (slurp resource))))))
             (catch Exception e
               (throw (ex-info "Unable to ingest file" {:file     (.getName ^File file)
                                                        :abs-path serdes-meta} e))))))))

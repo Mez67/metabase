@@ -611,14 +611,6 @@
 (defmethod resource-paths :default [_]
   nil)
 
-(defmulti binary-resources?
-  "Whether resources are read and written as byte arrays rather than text."
-  {:arglists '([ingested])}
-  ingested-model)
-
-(defmethod binary-resources? :default [_]
-  false)
-
 (defmulti load-find-local
   "Given a path, tries to look up any corresponding local entity.
 

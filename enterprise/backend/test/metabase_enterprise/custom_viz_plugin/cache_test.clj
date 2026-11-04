@@ -79,6 +79,15 @@
       (is (thrown-with-msg? Exception #"must not contain \":\""
                             (cache/validate-bundle! bytes))))))
 
+(deftest validate-bundle-rejects-a-non-svg-icon-test
+  (testing "the icon is the one asset served, and it must be an SVG file"
+    (let [bytes (cvp.tu/make-tgz-bytes
+                 [["metabase-plugin.json" (json/encode {:name "thumbs" :icon "icon.png"})]
+                  ["dist/index.js" "{}"]
+                  ["dist/assets/icon.png" (byte-array [0x89 0x50 0x4e 0x47])]])]
+      (is (thrown-with-msg? Exception #"Plugin icon \"icon.png\" must be an SVG file"
+                            (cache/validate-bundle! bytes))))))
+
 (deftest validate-bundle-accepts-name-that-cannot-name-a-directory-test
   (testing "a name a repository can't use as a directory still validates: registration refuses it, a replacement of a
             plugin registered before the rule does not"

@@ -4,8 +4,6 @@
    [metabase-enterprise.remote-sync.source :as source]
    [metabase-enterprise.remote-sync.source.protocol :as source.p]))
 
-(set! *warn-on-reflection* true)
-
 (defrecord MockSourceSnapshot [files]
   source.p/SourceSnapshot
   (list-files [_]
@@ -16,9 +14,6 @@
 
   (read-file [_ path]
     (get files path))
-
-  (read-bytes [_ path]
-    (some-> (get files path) source.p/content-bytes))
 
   (open-commit [_]
     (throw (UnsupportedOperationException. "open-commit not implemented in this test mock")))

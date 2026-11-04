@@ -45,8 +45,17 @@ export async function packPlugin(dir: string = process.cwd()) {
     throw new Error('package.json is missing a "version" field.');
   }
 
-  // The icon is the only asset Metabase serves, so it is the only one packed.
+  // The icon is the only asset Metabase serves, so it is the only one packed,
+  // and Metabase accepts it only as an SVG file.
   const assetNames: string[] = manifest.icon ? [manifest.icon] : [];
+
+  for (const assetName of assetNames) {
+    if (!assetName.toLowerCase().endsWith(".svg")) {
+      throw new Error(
+        `Icon "${assetName}" declared in metabase-plugin.json must be an SVG file.`,
+      );
+    }
+  }
 
   const tar = tarPack();
   const mtime = new Date();

@@ -28,9 +28,7 @@
           (doseq [[segments content] (storage.util/resource-files resolved entity)
                   :let [resource (apply io/file root-dir segments)]]
             (io/make-parents resource)
-            (if (bytes? content)
-              (io/copy content resource)
-              (spit resource content)))
+            (spit resource content))
           (:serdes/meta entity)))
 
       (store-settings! [_ settings]

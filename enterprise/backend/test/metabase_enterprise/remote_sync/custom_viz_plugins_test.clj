@@ -22,19 +22,19 @@
 (use-fixtures :each
   remote-sync.tu/allow-remote-synced-collections test-helpers/clean-remote-sync-state test-helpers/commit-with-temp)
 
-(def ^:private icon-bytes
-  "Non-UTF-8 bytes, to catch a text round trip."
-  (byte-array [0x89 0x50 0x4e 0x47 0 0xff]))
+(def ^:private icon-svg
+  "The SVG icon; the text outside ASCII catches a wrong charset."
+  "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Daumen hoch – 👍</title></svg>")
 
 (defn- manifest [identifier]
-  {:name identifier :icon "icon.png" :metabase {:version ">=1.60"}})
+  {:name identifier :icon "icon.svg" :metabase {:version ">=1.60"}})
 
 (defn- plugin-files
-  "The files of plugin `identifier`'s bundle, relative to its directory, with `js` as its script."
+  "The files of plugin `identifier`'s bundle as text, relative to its directory, with `js` as its script."
   [identifier js]
-  {"metabase-plugin.json" (.getBytes ^String (json/encode (manifest identifier)) "UTF-8")
-   "dist/index.js"        (.getBytes ^String js "UTF-8")
-   "dist/assets/icon.png" icon-bytes})
+  {"metabase-plugin.json" (json/encode (manifest identifier))
+   "dist/index.js"        js
+   "dist/assets/icon.svg" icon-svg})
 
 (defn- plugin-tree
   "Repo files for plugin `identifier`: its YAML and the files of its bundle."
@@ -54,10 +54,10 @@
   (into #{} (filter #(re-find #"^custom_viz_plugins/" %)) (keys repo)))
 
 (defn- stored-files
-  "The files of the bundle stored for plugin `identifier`, mapped to byte sequences."
+  "The files of the bundle stored for plugin `identifier`, as text."
   [identifier]
   (update-vals (cache/bundle->files (t2/select-one-fn :bundle [:model/CustomVizPlugin :bundle] :identifier identifier))
-               seq))
+               #(String. ^bytes % "UTF-8")))
 
 (defn- new-task! [sync-task-type]
   (t2/insert-returning-pk! :model/RemoteSyncTask {:sync_task_type sync-task-type :initiated_by (mt/user->id :rasta)}))
@@ -114,17 +114,17 @@
                                                      "v1" (plugin-tree "thumbs" "v2();")
                                                      "v2" {"README.md" "x"}}
                                              :current "v0")]
-      (testing "a pull registers the plugin from its files, bytes intact"
+      (testing "a pull registers the plugin from its files, text intact"
         (import-ok! src "v0" :force? true)
-        (is (=? {:status :active :enabled true :display_name "thumbs" :icon "icon.png"}
+        (is (=? {:status :active :enabled true :display_name "thumbs" :icon "icon.svg"}
                 (t2/select-one :model/CustomVizPlugin :identifier "thumbs")))
-        (is (= (update-vals (plugin-files "thumbs" "v1();") seq) (stored-files "thumbs")))
+        (is (= (plugin-files "thumbs" "v1();") (stored-files "thumbs")))
         (is (= "synced" (t2/select-one-fn :status :model/RemoteSyncObject :model_type "CustomVizPlugin"))))
       (testing "a changed bundle file updates the plugin in place"
         (let [id (t2/select-one-pk :model/CustomVizPlugin :identifier "thumbs")]
           (import-ok! src "v1")
           (is (= id (t2/select-one-pk :model/CustomVizPlugin :identifier "thumbs")))
-          (is (= (seq (.getBytes "v2();" "UTF-8")) (get (stored-files "thumbs") "dist/index.js")))))
+          (is (= "v2();" (get (stored-files "thumbs") "dist/index.js")))))
       (testing "a plugin whose directory is gone is deleted"
         (import-ok! src "v2")
         (is (not (t2/exists? :model/CustomVizPlugin :identifier "thumbs")))
@@ -157,14 +157,14 @@
           repo #(get @(:files-atom mock) "main")]
       (mt/with-temp [:model/Collection _ {:name "Synced" :is_remote_synced true :location "/"}]
         (upload! 200 (plugin-files "thumbs" "v1();"))
-        (testing "an uploaded plugin is exported as its YAML and the files of its bundle, bytes intact"
+        (testing "an uploaded plugin is exported as its YAML and the files of its bundle, text intact"
           (is (=? {:status :success :outcome {:kind "pushed"}} (export! mock)))
           (is (= #{"custom_viz_plugins/thumbs/custom_viz_plugin.yaml"
                    "custom_viz_plugins/thumbs/metabase-plugin.json"
                    "custom_viz_plugins/thumbs/dist/index.js"
-                   "custom_viz_plugins/thumbs/dist/assets/icon.png"}
+                   "custom_viz_plugins/thumbs/dist/assets/icon.svg"}
                  (plugin-files-in (repo))))
-          (is (= (seq icon-bytes) (seq (get (repo) "custom_viz_plugins/thumbs/dist/assets/icon.png"))))
+          (is (= icon-svg (get (repo) "custom_viz_plugins/thumbs/dist/assets/icon.svg")))
           (is (= "synced" (t2/select-one-fn :status :model/RemoteSyncObject :model_type "CustomVizPlugin"))))
         (testing "a replaced bundle is exported"
           (let [id (t2/select-one-pk :model/CustomVizPlugin :identifier "thumbs")]
@@ -172,7 +172,7 @@
                                   {:request-options {:headers {"content-type" "multipart/form-data"}}}
                                   {:file (cv.tu/make-tgz-bytes (plugin-files "thumbs" "v2();"))})
             (is (=? {:status :success :outcome {:kind "pushed"}} (export! mock)))
-            (is (= "v2();" (String. ^bytes (get (repo) "custom_viz_plugins/thumbs/dist/index.js") "UTF-8")))))
+            (is (= "v2();" (get (repo) "custom_viz_plugins/thumbs/dist/index.js")))))
         (testing "a deleted plugin's files are removed from the repo, and the other plugins' files stay"
           (upload! 200 (plugin-files "ops" "ops();"))
           (mt/user-http-request :crowberto :delete 204
@@ -181,7 +181,7 @@
           (is (= #{"custom_viz_plugins/ops/custom_viz_plugin.yaml"
                    "custom_viz_plugins/ops/metabase-plugin.json"
                    "custom_viz_plugins/ops/dist/index.js"
-                   "custom_viz_plugins/ops/dist/assets/icon.png"}
+                   "custom_viz_plugins/ops/dist/assets/icon.svg"}
                  (plugin-files-in (repo)))))))))
 
 (deftest export-keeps-files-serialization-does-not-own-test
@@ -200,7 +200,7 @@
                                   {:request-options {:headers {"content-type" "multipart/form-data"}}}
                                   {:file (cv.tu/make-tgz-bytes (plugin-files "thumbs" "v2();"))}))
           (export-ok! mock :force? true)
-          (is (= "v2();" (String. ^bytes (get (repo) "custom_viz_plugins/thumbs/dist/index.js") "UTF-8")))
+          (is (= "v2();" (get (repo) "custom_viz_plugins/thumbs/dist/index.js")))
           (is (= source (select-keys (repo) (keys source))))
           (testing "deleting the plugin removes only the files serialization owns"
             (upload! 200 (plugin-files "ops" "ops();"))
@@ -210,7 +210,7 @@
             (is (= (into #{"custom_viz_plugins/ops/custom_viz_plugin.yaml"
                            "custom_viz_plugins/ops/metabase-plugin.json"
                            "custom_viz_plugins/ops/dist/index.js"
-                           "custom_viz_plugins/ops/dist/assets/icon.png"}
+                           "custom_viz_plugins/ops/dist/assets/icon.svg"}
                          (keys source))
                    (plugin-files-in (repo))))))))))
 

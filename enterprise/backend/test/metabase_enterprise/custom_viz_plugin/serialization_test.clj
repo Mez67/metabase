@@ -25,20 +25,20 @@
 (set! *warn-on-reflection* true)
 
 (def ^:private icon-bytes
-  "Non-UTF-8 bytes to detect text conversion."
-  (byte-array [0x89 0x50 0x4e 0x47 0 0xff]))
+  "The SVG icon as bytes; the text outside ASCII catches a wrong charset."
+  (.getBytes "<svg xmlns=\"http://www.w3.org/2000/svg\"><title>Daumen hoch – 👍</title></svg>" "UTF-8"))
 
 (defn- manifest
   "The manifest of plugin `identifier`, naming the icon in [[plugin-files]]."
   [identifier]
-  {:name identifier :icon "icon.png" :metabase {:version ">=1.60"}})
+  {:name identifier :icon "icon.svg" :metabase {:version ">=1.60"}})
 
 (defn- plugin-files
-  "Bundle files with a binary icon."
+  "Bundle files, as bytes."
   [identifier]
   {"metabase-plugin.json" (.getBytes ^String (json/encode (manifest identifier)) "UTF-8")
    "dist/index.js"        (.getBytes "{}" "UTF-8")
-   "dist/assets/icon.png" icon-bytes})
+   "dist/assets/icon.svg" icon-bytes})
 
 (defn- insert-plugin! [identifier ^bytes bundle & {:as extra}]
   (t2/insert-returning-instance! :model/CustomVizPlugin
@@ -160,13 +160,13 @@
                              (assoc files
                                     "deploy/config.yaml" "a: [unterminated"
                                     "src/index.tsx" "{}"
-                                    "dist/assets/unused.png" "ignored"))
+                                    "dist/assets/unused.svg" "ignored"))
         (import! dump-dir)
         (testing "import derives metadata from the manifest"
           (is (=? {:status           :active
                    :enabled          true
                    :display_name     "thumbs"
-                   :icon             "icon.png"
+                   :icon             "icon.svg"
                    :metabase_version ">=1.60"
                    :manifest         (manifest "thumbs")
                    :bundle_hash      (cv.tu/bundle-hash (cache/files->bundle files))}
@@ -174,13 +174,13 @@
         (testing "only declared resources are packed and the icon remains intact"
           (is (= (update-vals files seq) (stored-files "thumbs")))
           (is (= (seq icon-bytes)
-                 (seq (cache/get-asset (t2/select-one :model/CustomVizPlugin :identifier "thumbs") "icon.png")))))))))
+                 (seq (cache/get-asset (t2/select-one :model/CustomVizPlugin :identifier "thumbs") "icon.svg")))))))))
 
 (deftest import-with-missing-files-replaces-an-active-plugins-bundle-test
   (mt/with-model-cleanup [:model/CustomVizPlugin]
     (ts/with-random-dump-dir [dump-dir "custom-viz-import-"]
       (let [healthy (cache/files->bundle (plugin-files "thumbs"))
-            {id :id} (insert-plugin! "thumbs" healthy :icon "icon.png" :metabase_version ">=1.60")]
+            {id :id} (insert-plugin! "thumbs" healthy :icon "icon.svg" :metabase_version ">=1.60")]
         (testing "missing resources replace the existing bundle with an error"
           (write-plugin-files! dump-dir "thumbs" (plugin-yaml "thumbs") {})
           (import! dump-dir)
@@ -195,11 +195,29 @@
             (is (not= (cv.tu/bundle-hash healthy) (:bundle_hash plugin))
                 "the healthy bundle is replaced, not kept")))))))
 
+(deftest import-of-a-plugin-with-a-bitmap-icon-lands-as-an-error-test
+  (mt/with-model-cleanup [:model/CustomVizPlugin]
+    (ts/with-random-dump-dir [dump-dir "custom-viz-import-"]
+      (let [files {"metabase-plugin.json" (json/encode {:name "thumbs" :icon "icon.png"})
+                   "dist/index.js"        "{}"
+                   "dist/assets/icon.png" (byte-array [0x89 0x50 0x4e 0x47])}]
+        (write-plugin-files! dump-dir "thumbs" (plugin-yaml "thumbs" :files (vec (sort (keys files)))) files)
+        (import! dump-dir)
+        (testing "the icon rule is the upload rule, so the plugin lands as an error row naming it"
+          (is (=? {:status        :error
+                   :error_message #(re-find #"Plugin icon \"icon.png\" must be an SVG file" %)}
+                  (t2/select-one [:model/CustomVizPlugin :status :error_message] :identifier "thumbs"))))))))
+
 (deftest import-refuses-a-bundle-over-the-upload-limit-test
   (mt/with-model-cleanup [:model/CustomVizPlugin]
     (ts/with-random-dump-dir [dump-dir "custom-viz-import-"]
-      (let [incompressible (byte-array (inc cache/max-bundle-bytes))]
-        (.nextBytes (Random. 1) incompressible)
+      ;; bundle files are read as text, so the oversized script is random printable ASCII: about 6.5 bits of entropy
+      ;; a character, which gzip can't bring under the limit from twice its size
+      (let [random         (Random. 1)
+            incompressible (let [sb (StringBuilder.)]
+                             (dotimes [_ (* 2 cache/max-bundle-bytes)]
+                               (.append sb (char (+ 33 (.nextInt random 94)))))
+                             (str sb))]
         (write-plugin-files! dump-dir "big" (plugin-yaml "big")
                              (assoc (plugin-files "big") "dist/index.js" incompressible))
         (import! dump-dir)

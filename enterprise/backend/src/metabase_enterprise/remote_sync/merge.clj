@@ -20,9 +20,7 @@
    [clojure.string :as str]
    [metabase.models.serialization :as serdes]
    [metabase.util.log :as log]
-   [metabase.util.yaml :as yaml])
-  (:import
-   (java.util Arrays)))
+   [metabase.util.yaml :as yaml]))
 
 (set! *warn-on-reflection* true)
 
@@ -74,13 +72,6 @@
            (transient {})
            specs)))
 
-(defn- content=
-  "Whether two file contents, each a string or a byte array, are equal."
-  [a b]
-  (if (and (bytes? a) (bytes? b))
-    (Arrays/equals ^bytes a ^bytes b)
-    (= a b)))
-
 (defn- same?
   "Two sides are the same when both are absent, or both present with equal path and content. Path equality
   matters so that a rename with otherwise identical content still counts as a change.
@@ -92,8 +83,7 @@
   silently wrong) but more conservative than git would be. Revisit by comparing content separately from
   path if it proves noisy in practice."
   [a b]
-  (and (= (:path a) (:path b))
-       (content= (:content a) (:content b))))
+  (= a b))
 
 (defn conflict-label
   "Renders a single conflict from [[three-way-merge]] into a human-readable string for display, e.g.

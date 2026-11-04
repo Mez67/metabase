@@ -246,6 +246,13 @@
                    (multipart-upload! :crowberto 400 "ee/custom-viz-plugin/"
                                       (cvp.tu/valid-bundle-bytes "a/b")))))))
 
+(deftest upload-rejects-a-non-svg-icon-test
+  (mt/with-premium-features #{:custom-viz}
+    (testing "a bitmap icon is refused at upload: the icon must be an SVG file"
+      (is (re-find #"Plugin icon \"icon.png\" must be an SVG file"
+                   (multipart-upload! :crowberto 400 "ee/custom-viz-plugin/"
+                                      (cvp.tu/valid-bundle-bytes "thumbs" {:icon "icon.png"})))))))
+
 ;;; ------------------------------------------------ CRUD ------------------------------------------------
 
 (deftest delete-test
@@ -333,19 +340,18 @@
 
 (deftest asset-endpoint-serves-icon-with-dot-segments-test
   (mt/with-premium-features #{:custom-viz}
-    (let [icon   (byte-array [0 (int 0x80) (int 0xff)])
-          bundle (cvp.tu/make-tgz-bytes [["metabase-plugin.json" (json/encode {:name "dot-icon" :icon "./icon.png"})]
+    (let [bundle (cvp.tu/make-tgz-bytes [["metabase-plugin.json" (json/encode {:name "dot-icon" :icon "./icon.svg"})]
                                          ["dist/index.js" "{}"]
-                                         ["dist/assets/icon.png" icon]])]
+                                         ["dist/assets/icon.svg" "<svg xmlns='http://www.w3.org/2000/svg'/>"]])]
       (mt/with-temp [:model/CustomVizPlugin {id :id} {:identifier   "dot-icon"
                                                       :display_name "dot-icon"
                                                       :status       :active
                                                       :bundle       bundle
                                                       :bundle_hash  (cvp.tu/bundle-hash bundle)
-                                                      :manifest     {:name "dot-icon" :icon "./icon.png"}}]
+                                                      :manifest     {:name "dot-icon" :icon "./icon.svg"}}]
         (testing "the icon is served at the path the manifest names"
           (mt/user-http-request :crowberto :get 200 (str "ee/custom-viz-plugin/" id "/asset")
-                                :path "./icon.png"))))))
+                                :path "./icon.svg"))))))
 
 ;;; ------------------------------------------------ Plugin Registration ------------------------------------------------
 

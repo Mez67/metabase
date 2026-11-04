@@ -14,6 +14,8 @@
    [toucan2.core :as t2]
    [toucan2.tools.default-fields :as t2.default-fields])
   (:import
+   (java.nio.charset StandardCharsets))
+  (:import
    (java.sql Blob)))
 
 (set! *warn-on-reflection* true)
@@ -72,7 +74,8 @@
 ;; A plugin serializes as `custom_viz_plugins/<identifier>/custom_viz_plugin.yaml` with its bundle unpacked beside it,
 ;; laid out as `npx @metabase/custom-viz pack` archives it: `metabase-plugin.json` at the root, `dist/index.js`, and
 ;; the icon the manifest names under `dist/assets/`. The YAML declares those files beside the plugin's identity.
-;; An import packs those files back into an archive, so a plugin's files are what a repository reviews
+;; The files are all text (the icon is an SVG), so they travel as strings, as a data app's
+;; bundle does. An import packs them back into an archive, so a plugin's files are what a repository reviews
 ;; and what an instance stores. Whether a plugin is enabled is an admin's choice on each instance, as for data apps,
 ;; so the YAML carries no settings at all.
 
@@ -98,11 +101,26 @@
         (map (comp asset-file normalize-path))
         (manifest/asset-paths (some-> (read-text (manifest/manifest-path)) manifest/parse-manifest))))
 
+(defn- file->text
+  "The bytes of an archive file as the text of its file."
+  ^String [^bytes content]
+  (String. content StandardCharsets/UTF_8))
+
+(defn- text->file
+  "The `content` of a text file as the bytes an archive holds."
+  ^bytes [^String content]
+  (.getBytes content StandardCharsets/UTF_8))
+
 (defn- served-files
-  "The entries of `files`, a map of archive path to bytes, at the [[served-paths]]. An uploaded archive may hold
-  more, such as a source map; an import reads back only these, so an export writes only these."
+  "The entries of `files`, a map of archive path to bytes, at the [[served-paths]], as text. An uploaded archive may
+  hold more, such as a source map; an import reads back only these, so an export writes only these."
   [files]
-  (select-keys files (served-paths (fn [path] (some-> ^bytes (get files path) (String. "UTF-8"))))))
+  (let [read-text (fn [path] (some-> ^bytes (get files path) file->text))]
+    (into {}
+          (keep (fn [path]
+                  (when-some [text (read-text path)]
+                    [path text])))
+          (served-paths read-text))))
 
 (defn- export-bundle
   "The files a plugin's stored `bundle` exports beside its YAML, or `::serdes/skip` for a dev-only plugin, which
@@ -121,7 +139,11 @@
   "The archive of the `files` read from beside a plugin's YAML. A file that isn't there is left out, and
   validation names it."
   [files]
-  (cache/files->bundle (into {} (filter val) files)))
+  (cache/files->bundle (into {}
+                             (keep (fn [[path content]]
+                                     (when content
+                                       [path (text->file content)])))
+                             files)))
 
 (defmethod serdes/make-spec "CustomVizPlugin"
   [_model-name _opts]
@@ -250,6 +272,3 @@
     (throw (ex-info (format "CustomVizPlugin files must be a list of paths, got: %s" (pr-str files))
                     {:files files})))
   files)
-
-(defmethod serdes/binary-resources? "CustomVizPlugin" [_ingested]
-  true)

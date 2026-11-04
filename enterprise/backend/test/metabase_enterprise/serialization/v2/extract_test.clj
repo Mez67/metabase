@@ -2659,8 +2659,8 @@
 
 (deftest custom-viz-plugin-test
   (mt/with-empty-h2-app-db!
-    (let [files {"metabase-plugin.json" (.getBytes ^String (json/encode {:name "test-plugin"}) "UTF-8")
-                 "dist/index.js"        (.getBytes "{}" "UTF-8")}]
+    (let [files {"metabase-plugin.json" (json/encode {:name "test-plugin"})
+                 "dist/index.js"        "{}"}]
       (ts/with-temp-dpc [:model/CustomVizPlugin {plugin-id :id} {:display_name "Test Plugin"
                                                                  :identifier   "test-plugin"
                                                                  :status       :active
@@ -2671,7 +2671,7 @@
                    :files       ["dist/index.js" "metabase-plugin.json"]}
                   ser))
           (is (= #{:serdes/meta :identifier :files :serdes/resources} (set (keys ser))))
-          (is (= (update-vals files seq) (update-vals (:serdes/resources ser) seq)))
+          (is (= files (:serdes/resources ser)))
           (is (empty? (serdes/deserialization-dependencies ser))))))))
 
 (deftest ^:parallel export-parameters-sorts-by-id-test

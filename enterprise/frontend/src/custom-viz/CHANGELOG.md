@@ -4,6 +4,10 @@ This changelog covers the `@metabase/custom-viz` npm package — the API and CLI
 
 ## Unreleased
 
+### ⚠ BREAKING CHANGES
+
+- The plugin icon must be an SVG file. `@metabase/custom-viz pack` fails when `metabase-plugin.json` names an icon of any other type, and Metabase refuses such a bundle at upload. Convert a PNG or JPEG icon to SVG (the scaffold's `public/assets/icon.svg` is a starting point); a plugin already uploaded with a bitmap icon keeps working but shows no icon until it is re-uploaded.
+
 ### Bug Fixes
 
 - The scaffolded dev server no longer crashes when an asset file disappears before it's copied, which happened with editors that save through atomic writes, or when a directory is added to `public/assets`. One save now triggers a single reload. Assets deleted from `public/assets` are now removed from `dist/assets` too ([#83597](https://github.com/metabase/metabase/pull/83597)).

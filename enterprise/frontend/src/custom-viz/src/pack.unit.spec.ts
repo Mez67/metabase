@@ -226,6 +226,21 @@ describe("pack", () => {
     );
   });
 
+  it("rejects an icon that is not an SVG file", async () => {
+    buildProject();
+    writeFileSync(
+      join(projectDir, "dist", "assets", "icon.png"),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+    );
+    editJson("metabase-plugin.json", (manifest) => {
+      manifest.icon = "icon.png";
+    });
+
+    await expect(packPlugin(projectDir)).rejects.toThrow(
+      'Icon "icon.png" declared in metabase-plugin.json must be an SVG file.',
+    );
+  });
+
   it("rejects an icon missing from dist/assets/", async () => {
     buildProject();
     rmSync(join(projectDir, "dist", "assets", "icon.svg"));
