@@ -500,6 +500,19 @@
                     {:status-code 403
                      :type        :metabot/permission-denied}))))
 
+(defn- turn-tracking-opts
+  "The tracking opts of one turn: the caller's `tracking-opts` over the defaults, among them the request id that
+  ties the turn's analytics events together. Built before [[init-agent]], so a turn that dies there still reports
+  its finish."
+  [profile-id tracking-opts]
+  (merge {:profile-id          profile-id
+          :request-id          (str (random-uuid))
+          :source              "metabot_agent"
+          :tag                 "agent"
+          :required-permission (or (profile-id->required-permission profile-id)
+                                   :permission/metabot)}
+         tracking-opts))
+
 (defn- init-agent
   "Initialize agent state.
 
@@ -554,13 +567,7 @@
      :system-msg    (messages/build-system-message context profile tools)
      :context       context
      :memory-atom   memory-atom
-     :tracking-opts (merge {:profile-id          profile-id
-                            :request-id          (str (random-uuid))
-                            :source              "metabot_agent"
-                            :tag                 "agent"
-                            :required-permission (or (profile-id->required-permission profile-id)
-                                                     :permission/metabot)}
-                           tracking-opts)}))
+     :tracking-opts (turn-tracking-opts profile-id tracking-opts)}))
 
 (defn- initial-loop-state
   "Create initial loop state from agent config and reduction context."
@@ -856,8 +863,8 @@
                                               :ai/messages   (:messages opts)
                                               :ai/context    (:context opts)
                                               :ai/state      (:state opts)}
-                          (let [agent      (init-agent opts)
-                                _          (reset! turn-tracking (:tracking-opts agent))
+                          (let [tracking   (reset! turn-tracking (turn-tracking-opts profile-id (:tracking-opts opts)))
+                                agent      (init-agent (assoc opts :tracking-opts tracking))
                                 usage-atom (atom {})
                                 {result        :result
                                  iteration     :iteration
