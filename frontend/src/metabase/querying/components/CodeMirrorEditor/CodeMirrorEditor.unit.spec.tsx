@@ -37,11 +37,13 @@ function setup({
   readOnly = false,
   snippets = [],
   proposedText,
+  engine = "h2",
 }: {
   text?: string;
   readOnly?: boolean;
   snippets?: NativeQuerySnippet[];
   proposedText?: string;
+  engine?: string;
 } = {}) {
   const onChange = jest.fn();
   const onCursorMoveOverCardTag = jest.fn();
@@ -50,12 +52,13 @@ function setup({
   const onAcceptProposed = jest.fn();
   const onRejectProposed = jest.fn();
   const onRunQuery = jest.fn();
+  const onFormatQuery = jest.fn();
 
   fetchMock.get("path:/api/native-query-snippet", {
     body: snippets,
   });
 
-  const database = createSampleDatabase();
+  const database = createSampleDatabase({ engine });
   const metadata = createMockMetadata({
     databases: [database],
   });
@@ -75,6 +78,7 @@ function setup({
     onAcceptProposed,
     onRejectProposed,
     onRunQuery,
+    onFormatQuery,
     onChange,
     readOnly,
     onCursorMoveOverCardTag,
@@ -94,6 +98,7 @@ function setup({
     onAcceptProposed,
     onRejectProposed,
     onRunQuery,
+    onFormatQuery,
     createQuery: (text: string) =>
       Lib.createTestNativeQuery(provider, { query: text }),
     rerender: (overrides: Partial<CodeMirrorEditorProps>) =>
@@ -347,5 +352,74 @@ describe("CodemirrorEditor", () => {
     expect(
       screen.queryByRole("button", { name: /Reject/ }),
     ).not.toBeInTheDocument();
+  });
+
+  describe("keyboard shortcuts", () => {
+    beforeEach(() => {
+      fetchMock.get("path:/api/database/1/autocomplete_suggestions", []);
+      fetchMock.get("path:/api/database/1/card_autocomplete_suggestions", []);
+    });
+
+    async function typeAtEnd(keys: string) {
+      await waitForRequestsToSettle();
+      await userEvent.click(screen.getByRole("textbox"));
+      await userEvent.keyboard(`{Control>}{End}{/Control}${keys}`);
+    }
+
+    it("runs the query with Ctrl+Enter without inserting a newline", async () => {
+      const { onRunQuery, onChange } = setup({ text: "SELECT 1" });
+
+      await typeAtEnd("{Control>}{Enter}{/Control}");
+
+      expect(onRunQuery).toHaveBeenCalledTimes(1);
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("formats the query with Shift+Ctrl+F", async () => {
+      const { onFormatQuery } = setup({ text: "SELECT 1" });
+
+      await typeAtEnd("{Shift>}{Control>}f{/Control}{/Shift}");
+
+      expect(onFormatQuery).toHaveBeenCalledTimes(1);
+    });
+
+    it("inserts a tab at the cursor and indents the selected lines", async () => {
+      const { onChange } = setup({ text: "SELECT" });
+
+      await typeAtEnd("{Tab}");
+      expect(onChange).toHaveBeenLastCalledWith("SELECT\t", expect.anything());
+
+      await userEvent.keyboard("{Control>}a{/Control}{Tab}");
+      expect(onChange).toHaveBeenLastCalledWith(
+        "\tSELECT\t",
+        expect.anything(),
+      );
+    });
+
+    it("keeps the indentation of the previous line on a new line", async () => {
+      const { onChange } = setup();
+
+      await typeAtEnd("{Tab}SELECT{Enter}FOO");
+
+      expect(onChange).toHaveBeenLastCalledWith(
+        "\tSELECT\n\tFOO",
+        expect.anything(),
+      );
+    });
+
+    it("indents json-like queries with two spaces", async () => {
+      const { onChange } = setup({ engine: "mongo" });
+
+      await typeAtEnd("{Tab}");
+      expect(onChange).toHaveBeenLastCalledWith("  ", expect.anything());
+
+      await userEvent.keyboard(
+        '{Control>}a{/Control}{Backspace}[[{Enter}{{{Enter}"foo": "bar",{Enter}"baz"',
+      );
+      expect(onChange).toHaveBeenLastCalledWith(
+        ["[", "  {", '    "foo": "bar",', '    "baz"', "  }", "]"].join("\n"),
+        expect.anything(),
+      );
+    });
   });
 });
