@@ -6,7 +6,10 @@
    All roots live in one atom, so [[snapshot]] reads every root at a single instant.
    Each thread's bindings are an overlay holding only the components bound on that thread, never a copy of the system.
    An unbound component reads straight through to its root, so binding or changing one component never affects
-   another."
+   another.
+
+   A derived component, made with [[derived-component-handle]], is read-only: its value is made from other components'
+   current values, so it follows their bindings without one of its own."
   (:require
    [clojure.pprint :as pprint]
    [metabase.global-system.mutable-component :as mc])

@@ -408,6 +408,9 @@
                  {:calls @calls, :value @handle})))
         (finally
           (mc/remove-root handle))))))
+
+;;; ------------------------------------------- Derived components --------------------------------------------
+
 (deftest ^:synchronized derived-component-test
   (mc/alter-root db-handle :root-db)
   (let [makes   (atom 0)
